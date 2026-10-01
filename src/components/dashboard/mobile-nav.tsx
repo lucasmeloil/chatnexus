@@ -40,59 +40,59 @@ interface NavGroup {
 // Keep in sync with sidebar-nav.tsx
 const navGroups: NavGroup[] = [
     {
-        label: "Main",
+        label: "Principal",
         items: [
             { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-            { href: "/dashboard/sessions", label: "Sessions / QR", icon: QrCode },
+            { href: "/dashboard/sessions", label: "Sessões / QR Code", icon: QrCode },
         ],
     },
     {
-        label: "Messaging",
+        label: "Mensagens",
         items: [
-            { href: "/dashboard/chat", label: "Chat", icon: MessageSquare },
-            { href: "/dashboard/broadcast", label: "Broadcast", icon: Megaphone },
-            { href: "/dashboard/sticker", label: "Sticker Maker", icon: ImageIcon },
+            { href: "/dashboard/chat", label: "Chat ao Vivo", icon: MessageSquare },
+            { href: "/dashboard/broadcast", label: "Disparos / Broadcast", icon: Megaphone },
+            { href: "/dashboard/sticker", label: "Criador de Figurinhas", icon: ImageIcon },
         ],
     },
     {
-        label: "Contacts",
+        label: "Contatos",
         items: [
-            { href: "/dashboard/contacts", label: "Contacts", icon: UserCheck },
-            { href: "/dashboard/groups", label: "Groups", icon: Users },
-            { href: "/dashboard/labels", label: "Labels", icon: Tag },
+            { href: "/dashboard/contacts", label: "Contatos", icon: UserCheck },
+            { href: "/dashboard/groups", label: "Grupos", icon: Users },
+            { href: "/dashboard/labels", label: "Etiquetas", icon: Tag },
         ],
     },
     {
-        label: "Automation",
+        label: "Automação",
         items: [
-            { href: "/dashboard/bot-settings", label: "Bot Settings", icon: Bot },
-            { href: "/dashboard/autoreply", label: "Auto Reply", icon: MessageCircleReply },
-            { href: "/dashboard/profile", label: "Bot Profile", icon: UserCircle },
-            { href: "/dashboard/scheduler", label: "Scheduler", icon: CalendarClock },
-            { href: "/dashboard/webhooks", label: "Webhooks & API", icon: Webhook },
+            { href: "/dashboard/bot-settings", label: "Configuração do Bot", icon: Bot },
+            { href: "/dashboard/autoreply", label: "Respostas Automáticas", icon: MessageCircleReply },
+            { href: "/dashboard/profile", label: "Perfil do Bot", icon: UserCircle },
+            { href: "/dashboard/scheduler", label: "Agendador", icon: CalendarClock },
+            { href: "/dashboard/webhooks", label: "Webhooks e API", icon: Webhook },
         ],
     },
     {
-        label: "Developer",
+        label: "Desenvolvedor",
         items: [
-            { href: "/docs", label: "API Docs", icon: FileText },
+            { href: "/docs", label: "Documentação da API", icon: FileText },
             { href: "/swagger", label: "Swagger UI", icon: Code, external: true },
         ],
     },
     {
-        label: "Administration",
+        label: "Administração",
         items: [
-            { href: "/dashboard/media", label: "Media Manager", icon: HardDrive },
-            { href: "/dashboard/sessions/access", label: "Session Access", icon: UserPlus },
-            { href: "/dashboard/users", label: "Users", icon: Users },
-            { href: "/dashboard/settings", label: "Settings", icon: Settings },
-            { href: "/dashboard/system-monitor", label: "System Monitor", icon: Activity, superadminOnly: true },
-            { href: "/dashboard/notifications", label: "Notifications", icon: Bell, superadminOnly: true },
+            { href: "/dashboard/media", label: "Gerenciador de Mídia", icon: HardDrive },
+            { href: "/dashboard/sessions/access", label: "Acesso a Sessões", icon: UserPlus },
+            { href: "/dashboard/users", label: "Usuários", icon: Users },
+            { href: "/dashboard/settings", label: "Configurações", icon: Settings },
+            { href: "/dashboard/system-monitor", label: "Monitor do Sistema", icon: Activity, superadminOnly: true },
+            { href: "/dashboard/notifications", label: "Notificações", icon: Bell, superadminOnly: true },
         ],
     },
 ];
 
-export function MobileNav({ appName = "WA-AKG" }: { appName?: string }) {
+export function MobileNav({ appName = "NEXUS CHAT" }: { appName?: string }) {
     const [open, setOpen] = useState(false);
     const pathname = usePathname();
     const { data: session } = useSession();
@@ -112,9 +112,12 @@ export function MobileNav({ appName = "WA-AKG" }: { appName?: string }) {
                 </Button>
             </SheetTrigger>
             <SheetContent side="left" className="w-[85vw] sm:w-[320px] p-0 flex flex-col">
-                <SheetHeader className="px-5 py-4 text-left border-b border-slate-100">
-                    <SheetTitle className="text-xl font-bold text-slate-800">{appName}</SheetTitle>
-                    <SheetDescription className="text-[11px] text-slate-400 -mt-1">WhatsApp Gateway</SheetDescription>
+                <SheetHeader className="px-5 py-4 text-left border-b border-slate-100 dark:border-border/30">
+                    <SheetTitle className="sr-only">{appName}</SheetTitle>
+                    <SheetDescription className="sr-only">NEXUS CHAT</SheetDescription>
+                    <div className="flex items-center">
+                        <img src="/nexus-logo.png" alt="NEXUS CHAT" className="h-8 w-auto object-contain" />
+                    </div>
                 </SheetHeader>
 
                 <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-1">
@@ -126,7 +129,7 @@ export function MobileNav({ appName = "WA-AKG" }: { appName?: string }) {
 
                         return (
                             <div key={group.label} className="mb-1">
-                                {group.label !== "Main" && (
+                                {group.label !== "Principal" && group.label !== "Main" && (
                                     <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                                         {group.label}
                                     </p>

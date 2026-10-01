@@ -1,0 +1,53 @@
+[
+  {
+    "id": "qr-1",
+    "shortcut": "/ola",
+    "title": "Saudação Inicial",
+    "content": "Olá! Seja muito bem-vindo(a) ao atendimento NEXUS SOFT TECH. Como posso te ajudar hoje?",
+    "category": "Geral",
+    "updatedAt": "2026-10-01T16:14:36.661Z"
+  },
+  {
+    "id": "qr-2",
+    "shortcut": "/pix",
+    "title": "Chave PIX e Pagamento",
+    "content": "Para pagamentos via PIX, utilize nossa chave oficial: \n\nCNPJ 53.345.197/0001-67\n\nApós a transferência, nos envie o comprovante por aqui.",
+    "category": "Financeiro",
+    "updatedAt": "2026-10-01T16:15:13.176Z"
+  },
+  {
+    "id": "qr-3",
+    "shortcut": "/horario",
+    "title": "Horário de Atendimento",
+    "content": "Nosso horário de funcionamento é de segunda a sexta-feira, das 08h às 18h, e aos sábados das 08h às 12h.",
+    "category": "Geral"
+  },
+  {
+    "id": "qr-4",
+    "shortcut": "/aguarde",
+    "title": "Aguarde um momento",
+    "content": "Um momento, por favor. Já estou consultando as informações no sistema e retorno em instantes.",
+    "category": "Atendimento"
+  },
+  {
+    "id": "qr-5",
+    "shortcut": "/finalizar",
+    "title": "Finalização de Atendimento",
+    "content": "Atendimento finalizado com sucesso! Agradecemos pela preferência e estamos sempre à disposição. Tenha um excelente dia!",
+    "category": "Atendimento"
+  },
+  {
+    "id": "qr-6",
+    "shortcut": "/comercial",
+    "title": "Transferência Comercial",
+    "content": "Estou direcionando o seu atendimento ao setor Comercial para prosseguir com a sua solicitação.",
+    "category": "Comercial"
+  },
+  {
+    "id": "qr-7",
+    "shortcut": "/pessoal",
+    "title": "Transferência Pessoal / Suporte",
+    "content": "Estou transferindo o seu atendimento ao setor Pessoal / Suporte para lhe auxiliar detalhadamente.",
+    "category": "Pessoal"
+  }
+]

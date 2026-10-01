@@ -91,9 +91,8 @@ export async function POST(
         }
 
         // Fetch system timezone
-        // @ts-ignore
         const systemConfig = await prisma.systemConfig.findUnique({ where: { id: "default" } });
-        const timezone = systemConfig?.timezone || "Asia/Jakarta";
+        const timezone = systemConfig?.timezone || process.env.TZ || "America/Sao_Paulo";
 
         console.log(`[Scheduler:POST] Received sendAt: ${sendAt}, using timezone: ${timezone}`);
         const utcDate = moment.tz(sendAt, timezone).toDate();

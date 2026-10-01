@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useSession } from "@/components/dashboard/session-provider";
 import { SessionGuard } from "@/components/dashboard/session-guard";
 import { useSocket } from "@/components/chat/socket-context";
+import { formatToBrazilPhoneJid } from "@/lib/jid-utils";
 
 interface BroadcastProgress {
     broadcastId: string;
@@ -145,12 +146,11 @@ export default function BroadcastPage() {
 
         try {
             const recipients = contacts.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map(s => {
-                if (!s.includes('@')) return `${s}@s.whatsapp.net`;
-                return s;
+                return formatToBrazilPhoneJid(s);
             });
 
             if (recipients.length === 0) {
-                toast.error("No recipients specified");
+                toast.error("Nenhum destinatário informado");
                 setLoading(false);
                 return;
             }
@@ -228,20 +228,20 @@ export default function BroadcastPage() {
                             {/* Recipients Card */}
                             <Card>
                                 <CardHeader>
-                                    <CardTitle>Recipients</CardTitle>
-                                    <CardDescription>Enter phone numbers separated by comma or new line.</CardDescription>
+                                    <CardTitle>Destinatários</CardTitle>
+                                    <CardDescription>Insira os números de telefone separados por vírgula ou nova linha.</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label>Target Numbers (e.g., 628123456789)</Label>
+                                        <Label>Números de Destino (Ex: (11) 98765-4321 ou 5511...)</Label>
                                         <Textarea
-                                            placeholder={"628123456789\n628987654321"}
+                                            placeholder={"11987654321\n(11) 91234-5678\n552199887766"}
                                             className="min-h-[200px] font-mono text-sm"
                                             value={contacts}
                                             onChange={e => setContacts(e.target.value)}
                                             disabled={loading}
                                         />
-                                        <p className="text-xs text-muted-foreground">{recipientCount} numbers identified</p>
+                                        <p className="text-xs text-muted-foreground">{recipientCount} números identificados (prefixo +55 adicionado automaticamente)</p>
                                     </div>
                                 </CardContent>
                             </Card>
@@ -249,13 +249,13 @@ export default function BroadcastPage() {
                             {/* Message Card */}
                             <Card>
                                 <CardHeader>
-                                    <CardTitle>Message Content</CardTitle>
+                                    <CardTitle>Conteúdo da Mensagem</CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label>Message</Label>
+                                        <Label>Mensagem</Label>
                                         <Textarea
-                                            placeholder="Type your message here..."
+                                            placeholder="Digite sua mensagem aqui..."
                                             className="min-h-[150px]"
                                             value={message}
                                             onChange={e => setMessage(e.target.value)}
@@ -265,7 +265,7 @@ export default function BroadcastPage() {
 
                                     <div className="space-y-4 pt-4">
                                         <div className="space-y-2">
-                                            <Label>Delay: {(delay[0] / 1000).toFixed(1)}s</Label>
+                                            <Label>Intervalo (Delay): {(delay[0] / 1000).toFixed(1)}s</Label>
                                             <Slider
                                                 defaultValue={[2000]}
                                                 min={1000}
@@ -275,7 +275,7 @@ export default function BroadcastPage() {
                                                 onValueChange={setDelay}
                                                 disabled={loading}
                                             />
-                                            <p className="text-xs text-muted-foreground">Delay antar pesan (+ random).</p>
+                                            <p className="text-xs text-muted-foreground">Intervalo entre disparos (+ variação aleatória).</p>
                                         </div>
 
                                         <Button
@@ -284,7 +284,7 @@ export default function BroadcastPage() {
                                             disabled={loading || !sessionId || recipientCount === 0 || !message.trim()}
                                         >
                                             {loading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                            {loading ? "Broadcasting..." : "Start Broadcast"}
+                                            {loading ? "Disparando..." : "Iniciar Disparo em Massa"}
                                         </Button>
                                     </div>
                                 </CardContent>

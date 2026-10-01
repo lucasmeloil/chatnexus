@@ -4,23 +4,30 @@ import { ChatLayoutClient } from "@/components/chat/chat-layout-client";
 import { cookies } from "next/headers";
 import { canAccessSession } from "@/lib/api-auth";
 import { SessionGuard } from "@/components/dashboard/session-guard";
+import { formatToBrazilPhoneJid } from "@/lib/jid-utils";
 
-export default async function ChatPage() {
+export default async function ChatPage({
+    searchParams
+}: {
+    searchParams?: Promise<{ jid?: string }>;
+}) {
     const session = await auth();
-    console.log("ChatPage Session (Role debug):", session?.user?.role);
-
     if (!session?.user?.id) return <div>Unauthorized</div>;
+
+    const sp = await searchParams;
+    let initialJid: string | undefined = undefined;
+    if (sp?.jid) {
+        const decoded = decodeURIComponent(sp.jid);
+        initialJid = decoded.includes("@") ? decoded : formatToBrazilPhoneJid(decoded);
+    }
 
     const cookieStore = await cookies();
     const sessionId = cookieStore.get("sessionId")?.value;
     let validSessionId: string | null = null;
 
     if (sessionId) {
-        // Validate access
         const hasAccess = await canAccessSession(session.user.id, session.user.role, sessionId);
         if (hasAccess) {
-            // Ideally also check if CONNECTED but canAccessSession checks ownership.
-            // We can do an extra check if needed.
             validSessionId = sessionId;
         }
     }
@@ -35,7 +42,11 @@ export default async function ChatPage() {
 
     return (
         <div className="h-[calc(100vh-6.5rem)] sm:h-[calc(100vh-6rem)]">
-            <ChatLayoutClient key={validSessionId} sessionId={validSessionId} />
+            <ChatLayoutClient
+                key={`${validSessionId}-${initialJid || "none"}`}
+                sessionId={validSessionId}
+                initialJid={initialJid}
+            />
         </div>
     );
 }

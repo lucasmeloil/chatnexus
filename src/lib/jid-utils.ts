@@ -23,6 +23,44 @@ export function normalizeJid(jid: string | undefined | null): string {
 }
 
 /**
+ * Normaliza qualquer número de telefone ou JID para formato de WhatsApp brasileiro (@s.whatsapp.net).
+ * Adiciona automaticamente o DDI +55 quando informado com DDD (10 ou 11 dígitos, ex: 11987654321).
+ * Suporta formatos:
+ *  - "+55 (11) 98765-4321" -> "5511987654321@s.whatsapp.net"
+ *  - "(11) 98765-4321"     -> "5511987654321@s.whatsapp.net"
+ *  - "11987654321"         -> "5511987654321@s.whatsapp.net"
+ *  - "011987654321"        -> "5511987654321@s.whatsapp.net"
+ *  - "5511987654321"       -> "5511987654321@s.whatsapp.net"
+ *  - IDs de grupos (@g.us) ou canais (@newsletter) são mantidos intactos.
+ */
+export function formatToBrazilPhoneJid(raw: string | undefined | null): string {
+    if (!raw) return "";
+    let trimmed = raw.trim();
+    if (trimmed.endsWith("@g.us") || trimmed.endsWith("@newsletter") || trimmed.endsWith("@broadcast") || trimmed.endsWith("@lid")) {
+        return trimmed;
+    }
+    let jidClean = trimmed.replace(/@s\.whatsapp\.net$/, "").replace(/@c\.us$/, "");
+    let digits = jidClean.replace(/\D/g, "");
+
+    // Se começa com 0 (ex: 011987654321), remove o 0 inicial
+    if (digits.startsWith("0")) {
+        digits = digits.substring(1);
+    }
+
+    // Se possui 10 ou 11 dígitos (DDD + 8 ou 9 dígitos), é número do Brasil sem o DDI 55
+    if ((digits.length === 10 || digits.length === 11) && !digits.startsWith("55")) {
+        digits = "55" + digits;
+    }
+
+    // Se possui 12 dígitos com DDI 55 (55 + DDD de 2 dígitos + 8 dígitos), adiciona o 9º dígito
+    if (digits.length === 12 && digits.startsWith("55")) {
+        digits = `${digits.slice(0, 4)}9${digits.slice(4)}`;
+    }
+
+    return `${digits}@s.whatsapp.net`;
+}
+
+/**
  * Resolve a @lid JID to @s.whatsapp.net phone number JID.
  * 
  * Resolution strategy:
@@ -171,4 +209,32 @@ export async function batchResolveToPhoneJid(
     }
 
     return result;
+}
+
+/**
+ * Compare two JIDs for equality, handling Brazilian 12 vs 13 digits variations
+ * (@s.whatsapp.net, @c.us, with/without the 9th digit).
+ */
+export function isSameChatJid(a?: string | null, b?: string | null): boolean {
+    if (!a || !b) return false;
+    if (a === b) return true;
+
+    // Both normalize to same Brazilian phone JID (handles 10, 11, 12, 13 digits)
+    const normA = formatToBrazilPhoneJid(a);
+    const normB = formatToBrazilPhoneJid(b);
+    if (normA && normB && normA === normB) return true;
+
+    const cleanA = a.replace(/@.*$/, "").replace(/\D/g, "");
+    const cleanB = b.replace(/@.*$/, "").replace(/\D/g, "");
+    if (cleanA && cleanB && cleanA === cleanB) return true;
+
+    if (cleanA.startsWith("55") && cleanB.startsWith("55")) {
+        if (cleanA.length === 13 && cleanB.length === 12 && cleanA[4] === "9") {
+            return `${cleanA.slice(0, 4)}${cleanA.slice(5)}` === cleanB;
+        }
+        if (cleanB.length === 13 && cleanA.length === 12 && cleanB[4] === "9") {
+            return `${cleanB.slice(0, 4)}${cleanB.slice(5)}` === cleanA;
+        }
+    }
+    return false;
 }

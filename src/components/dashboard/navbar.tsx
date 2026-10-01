@@ -4,14 +4,29 @@ import { useState, useEffect } from "react";
 import { MobileNav } from "@/components/dashboard/mobile-nav";
 import { SessionSelector } from "@/components/dashboard/session-selector";
 import { Button } from "@/components/ui/button";
-import { RealtimeClock } from "@/components/dashboard/realtime-clock";
+import dynamic from "next/dynamic";
+const RealtimeClock = dynamic(
+    () => import("@/components/dashboard/realtime-clock").then((m) => m.RealtimeClock),
+    { ssr: false }
+);
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Bell, Inbox, Trash2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Bell, Inbox, Trash2, Volume2, VolumeX } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { io, Socket } from "socket.io-client";
+import { 
+    isNotificationSoundEnabled, 
+    setNotificationSoundEnabled, 
+    isFloatingNotificationEnabled,
+    setFloatingNotificationEnabled,
+    playNotificationSound,
+    isMuteActiveChatEnabled,
+    setMuteActiveChatEnabled
+} from "@/lib/notification-sound";
 
 interface NavbarProps {
     appName?: string;
@@ -34,6 +49,28 @@ export function Navbar({ appName }: NavbarProps) {
     const [unreadCount, setUnreadCount] = useState(0);
     const [isOpen, setIsOpen] = useState(false);
     const [socket, setSocket] = useState<Socket | null>(null);
+    const [soundEnabled, setSoundEnabled] = useState(true);
+    const [floatingEnabled, setFloatingEnabled] = useState(true);
+    const [muteActiveChat, setMuteActiveChat] = useState(true);
+
+    useEffect(() => {
+        setSoundEnabled(isNotificationSoundEnabled());
+        setFloatingEnabled(isFloatingNotificationEnabled());
+        setMuteActiveChat(isMuteActiveChatEnabled());
+
+        const handleSoundChange = (e: any) => setSoundEnabled(e.detail?.enabled ?? isNotificationSoundEnabled());
+        const handleFloatingChange = (e: any) => setFloatingEnabled(e.detail?.enabled ?? isFloatingNotificationEnabled());
+        const handleMuteChange = (e: any) => setMuteActiveChat(e.detail?.enabled ?? isMuteActiveChatEnabled());
+
+        window.addEventListener("nexus:sound-enabled-changed", handleSoundChange);
+        window.addEventListener("nexus:floating-notification-changed", handleFloatingChange);
+        window.addEventListener("nexus:mute-active-chat-changed", handleMuteChange);
+        return () => {
+            window.removeEventListener("nexus:sound-enabled-changed", handleSoundChange);
+            window.removeEventListener("nexus:floating-notification-changed", handleFloatingChange);
+            window.removeEventListener("nexus:mute-active-chat-changed", handleMuteChange);
+        };
+    }, []);
 
     const fetchNotifications = async () => {
         try {
@@ -68,18 +105,46 @@ export function Navbar({ appName }: NavbarProps) {
             socketInstance.on("notification:new", (notification: Notification) => {
                 console.log("New notification received:", notification);
 
-                // Add to notifications list
-                setNotifications(prev => [notification, ...prev]);
+                // Add to notifications list without duplicate IDs
+                setNotifications(prev => {
+                    if (prev.some(item => item.id === notification.id)) return prev;
+                    return [notification, ...prev];
+                });
                 setUnreadCount(prev => prev + 1);
 
                 // Show toast popup
                 toast.info(notification.title, {
                     description: notification.message,
                     action: notification.href ? {
-                        label: "View",
+                        label: "Ver",
                         onClick: () => router.push(notification.href!)
                     } : undefined,
                 });
+            });
+
+            // Listen for incoming WhatsApp messages from contacts
+            socketInstance.on("incoming.message", (data: any) => {
+                if (!data?.message) return;
+                const m = data.message;
+                const remoteJid = m.remoteJid || "";
+                if (remoteJid.includes("status@broadcast")) return;
+
+                const senderName = m.pushName || remoteJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+                const newNotif: Notification = {
+                    id: m.id || m.keyId || `msg-${Date.now()}`,
+                    title: `Mensagem de ${senderName}`,
+                    message: m.content || "Nova mensagem recebida",
+                    read: false,
+                    type: "MESSAGE",
+                    href: `/dashboard/chat?session=${data.sessionId}&jid=${encodeURIComponent(remoteJid)}`,
+                    createdAt: m.timestamp || new Date().toISOString()
+                };
+
+                setNotifications(prev => {
+                    if (prev.some(item => item.id === newNotif.id)) return prev;
+                    return [newNotif, ...prev];
+                });
+                setUnreadCount(prev => prev + 1);
             });
 
             setSocket(socketInstance);
@@ -144,9 +209,93 @@ export function Navbar({ appName }: NavbarProps) {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-                <span className="hidden sm:inline"><RealtimeClock /></span>
+                <div className="hidden sm:flex items-center"><RealtimeClock /></div>
                 <SessionSelector />
                 <div className="h-6 w-px bg-border/50 hidden sm:block" />
+
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="hover:bg-muted/50 rounded-full h-10 w-10 text-muted-foreground hover:text-foreground cursor-pointer"
+                            title="Configurações de som e notificações"
+                        >
+                            {soundEnabled ? (
+                                <Volume2 className="h-5 w-5 text-primary" />
+                            ) : (
+                                <VolumeX className="h-5 w-5 text-muted-foreground/60" />
+                            )}
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-4 rounded-2xl border border-border/50 shadow-2xl glass-panel" align="end">
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-2 pb-2 border-b border-border/40">
+                                <Volume2 className="h-4 w-4 text-primary" />
+                                <span className="font-semibold text-sm text-foreground">Sons e Notificações</span>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="space-y-0.5">
+                                    <Label className="text-xs font-medium cursor-pointer">Sons e Notificações</Label>
+                                    <p className="text-[11px] text-muted-foreground leading-tight">Tocar aviso sonoro nas novas mensagens</p>
+                                </div>
+                                <Switch
+                                    checked={soundEnabled}
+                                    onCheckedChange={(val) => {
+                                        setSoundEnabled(val);
+                                        setNotificationSoundEnabled(val);
+                                        if (val) {
+                                            playNotificationSound();
+                                            toast.success("Sons e notificações ativados");
+                                        } else {
+                                            toast.info("Sons e notificações desativados");
+                                        }
+                                    }}
+                                />
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="space-y-0.5">
+                                    <Label className="text-xs font-medium cursor-pointer">Notificações Flutuantes</Label>
+                                    <p className="text-[11px] text-muted-foreground leading-tight">Exibir aviso flutuante na tela ao receber novas mensagens</p>
+                                </div>
+                                <Switch
+                                    checked={floatingEnabled && soundEnabled}
+                                    disabled={!soundEnabled}
+                                    onCheckedChange={(val) => {
+                                        setFloatingEnabled(val);
+                                        setFloatingNotificationEnabled(val);
+                                        if (val) {
+                                            toast.success("Notificações flutuantes ativadas");
+                                        } else {
+                                            toast.info("Notificações flutuantes desativadas");
+                                        }
+                                    }}
+                                />
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="space-y-0.5">
+                                    <Label className="text-xs font-medium cursor-pointer">Silenciar Janela Aberta</Label>
+                                    <p className="text-[11px] text-muted-foreground leading-tight">Não emitir som nem avisos da conversa aberta no momento. Notifica apenas as demais conversas.</p>
+                                </div>
+                                <Switch
+                                    checked={muteActiveChat}
+                                    onCheckedChange={(val) => {
+                                        setMuteActiveChat(val);
+                                        setMuteActiveChatEnabled(val);
+                                        if (val) {
+                                            toast.success("Conversa aberta será silenciada");
+                                        } else {
+                                            toast.info("Notificações ativas para todas as conversas");
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    </PopoverContent>
+                </Popover>
 
                 <Popover open={isOpen} onOpenChange={setIsOpen}>
                     <PopoverTrigger asChild>
@@ -160,18 +309,18 @@ export function Navbar({ appName }: NavbarProps) {
                     <PopoverContent className="w-80 p-0 rounded-2xl border border-border/50 shadow-2xl glass-panel" align="end">
                         <div className="p-4 border-b border-border/50 flex justify-between items-center bg-background/50">
                             <div>
-                                <h4 className="font-semibold leading-none text-foreground">Notifications</h4>
+                                <h4 className="font-semibold leading-none text-foreground">Notificações</h4>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    {unreadCount > 0 ? `You have ${unreadCount} unread updates.` : "No new notifications."}
+                                    {unreadCount > 0 ? `Você tem ${unreadCount} atualização(ões) não lida(s).` : "Nenhuma nova notificação."}
                                 </p>
                             </div>
                             <div className="flex items-center gap-1">
                                 <Button variant="ghost" size="sm" className="h-auto py-1 px-2 text-xs" onClick={() => { router.push("/dashboard/inbox"); setIsOpen(false); }}>
-                                    See all
+                                    Ver todas
                                 </Button>
                                 {unreadCount > 0 && (
                                     <Button variant="ghost" size="sm" onClick={() => markAsRead()} className="h-auto py-1 px-2 text-xs">
-                                        Mark all read
+                                        Marcar como lidas
                                     </Button>
                                 )}
                             </div>
@@ -182,14 +331,14 @@ export function Navbar({ appName }: NavbarProps) {
                                     <div className="bg-slate-100 p-3 rounded-full mb-3">
                                         <Inbox className="h-6 w-6 text-slate-400" />
                                     </div>
-                                    <p className="text-sm font-medium">No new notifications</p>
-                                    <p className="text-xs text-muted-foreground max-w-[180px]">We'll notify you when something important arrives.</p>
+                                    <p className="text-sm font-medium">Nenhuma notificação nova</p>
+                                    <p className="text-xs text-muted-foreground max-w-[180px]">Notificaremos você assim que houver atualizações importantes.</p>
                                 </div>
                             ) : (
                                 <div className="divide-y">
-                                    {notifications.map(n => (
+                                    {notifications.map((n, idx) => (
                                         <div
-                                            key={n.id}
+                                            key={`${n.id || 'notif'}-${idx}`}
                                             className={`p-4 hover:bg-slate-50 transition-colors ${!n.read ? 'bg-blue-50/50' : ''}`}
                                         >
                                             <div className="flex justify-between items-start gap-3">
@@ -226,6 +375,22 @@ export function Navbar({ appName }: NavbarProps) {
                                     ))}
                                 </div>
                             )}
+                        </div>
+                        <div className="p-2.5 border-t border-border/50 bg-muted/20 flex justify-between items-center">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="w-full text-xs h-8 gap-1.5 font-medium hover:bg-blue-500/10 hover:border-blue-500/30 text-blue-700 dark:text-blue-400"
+                                onClick={() => {
+                                    playNotificationSound();
+                                    if (typeof window !== "undefined" && (window as any).__nexusTestNotification) {
+                                        (window as any).__nexusTestNotification();
+                                    }
+                                }}
+                            >
+                                <Volume2 className="h-3.5 w-3.5" />
+                                <span>Testar Som e Notificação Flutuante</span>
+                            </Button>
                         </div>
                     </PopoverContent>
                 </Popover>

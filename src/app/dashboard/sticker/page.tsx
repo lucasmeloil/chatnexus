@@ -10,6 +10,7 @@ import { toast } from "sonner";
 
 import { useSession } from "@/components/dashboard/session-provider";
 import { SessionGuard } from "@/components/dashboard/session-guard";
+import { formatToBrazilPhoneJid } from "@/lib/jid-utils";
 
 export default function StickerPage() {
     const { sessionId } = useSession();
@@ -36,7 +37,7 @@ export default function StickerPage() {
     const handleSend = async () => {
         if (!sessionId || !target || !file) return toast.error("Please fill all fields");
 
-        let jid = target.includes('@') ? target : `${target}@s.whatsapp.net`;
+        let jid = formatToBrazilPhoneJid(target);
         const encodedJid = encodeURIComponent(jid);
 
         setLoading(true);
@@ -85,9 +86,9 @@ export default function StickerPage() {
                         </CardHeader>
                         <CardContent className="space-y-4">
                             <div className="space-y-2">
-                                <Label>Target Number</Label>
+                                <Label>Número de Destino (Ex: (11) 98765-4321 ou 5511...)</Label>
                                 <Input
-                                    placeholder="628123456789"
+                                    placeholder="11987654321 ou 5511987654321"
                                     value={target}
                                     onChange={e => setTarget(e.target.value)}
                                 />

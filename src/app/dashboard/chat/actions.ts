@@ -5,9 +5,11 @@ import { ChatService } from "@/modules/whatsapp/chat.service";
 import { getAuthenticatedUserForAction } from "@/lib/server-action-auth";
 import { canAccessSession } from "@/lib/api-auth";
 
+import { AttendanceService } from "@/modules/whatsapp/attendance.service";
+
 const CHAT_PAGE_SIZE = parseInt(process.env.NEXT_PUBLIC_CHAT_PAGE_SIZE || "50", 10);
 
-// Fetch chat list with cursor-based pagination & search
+// Fetch chat list with cursor-based pagination & search, enriched with attendance
 export async function getChatsStatus(
     sessionId: string,
     limit = CHAT_PAGE_SIZE,
@@ -27,7 +29,30 @@ export async function getChatsStatus(
 
     if (!session) throw new Error("Session not found");
 
-    return await ChatService.getChatsList(session.id, limit, before, search);
+    const rawChats = await ChatService.getChatsList(session.id, limit, before, search);
+    const attendancesMap = await AttendanceService.getAttendancesMap(sessionId);
+
+    return rawChats.map((chat: any) => {
+        const att = attendancesMap.get(chat.jid);
+        return {
+            ...chat,
+            unreadCount: att?.status === "CLOSED" ? 0 : (chat.unreadCount || 0),
+            attendance: att ? {
+                id: att.id,
+                status: att.status,
+                assignedUserId: att.assignedUserId,
+                assignedUserName: att.assignedUserName,
+                departmentTag: att.departmentTag,
+                closedAt: att.closedAt
+            } : {
+                status: "WAITING",
+                assignedUserId: null,
+                assignedUserName: null,
+                departmentTag: null,
+                closedAt: null
+            }
+        };
+    });
 }
 
 // Fetch messages for a specific chat with cursor pagination
@@ -42,6 +67,15 @@ export async function getChatMessages(
 
     const canAccess = await canAccessSession(user.id, user.role, sessionId);
     if (!canAccess) throw new Error("Forbidden");
+
+    // Attendant Isolation Security Check:
+    // Any user who is not a SUPERADMIN cannot view another attendant's in-progress conversation
+    if (user.role !== "SUPERADMIN") {
+        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        if (attendance && attendance.status === "IN_PROGRESS" && attendance.assignedUserId && attendance.assignedUserId !== user.id) {
+            throw new Error(`Esta conversa está em atendimento por ${attendance.assignedUserName || "outro atendente"}.`);
+        }
+    }
 
     const session = await prisma.session.findUnique({
         where: { sessionId },
@@ -71,6 +105,28 @@ export async function sendChatMessage(sessionId: string, jid: string, text: stri
     const canAccess = await canAccessSession(user.id, user.role, sessionId);
     if (!canAccess) throw new Error("Forbidden");
 
+    if (user.role !== "SUPERADMIN") {
+        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        if (attendance && attendance.status === "IN_PROGRESS" && attendance.assignedUserId && attendance.assignedUserId !== user.id) {
+            throw new Error(`Você não tem permissão para enviar mensagens nesta conversa pois ela pertence a ${attendance.assignedUserName || "outro atendente"}.`);
+        }
+    }
+
+    // Auto-accept if conversation is WAITING
+    try {
+        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        if (!attendance || attendance.status === "WAITING") {
+            const updated = await AttendanceService.acceptAttendance(sessionId, jid, user.id, user.name || "Atendente");
+            const globalIo = (global as any).io;
+            if (globalIo) {
+                globalIo.emit("attendance.update", { sessionId, jid, action: "accept", data: updated });
+                globalIo.to(sessionId).emit("attendance.update", { sessionId, jid, action: "accept", data: updated });
+            }
+        }
+    } catch (e) {
+        // non-fatal
+    }
+
     try {
         await ChatService.sendTextMessage(sessionId, jid, { text }, undefined, quotedMessageId);
         return { success: true };
@@ -96,6 +152,28 @@ export async function sendMediaMessage(formData: FormData) {
 
     const canAccess = await canAccessSession(user.id, user.role, sessionId);
     if (!canAccess) throw new Error("Forbidden");
+
+    if (user.role !== "SUPERADMIN") {
+        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        if (attendance && attendance.status === "IN_PROGRESS" && attendance.assignedUserId && attendance.assignedUserId !== user.id) {
+            throw new Error(`Você não tem permissão para enviar arquivos nesta conversa pois ela pertence a ${attendance.assignedUserName || "outro atendente"}.`);
+        }
+    }
+
+    // Auto-accept if conversation is WAITING
+    try {
+        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        if (!attendance || attendance.status === "WAITING") {
+            const updated = await AttendanceService.acceptAttendance(sessionId, jid, user.id, user.name || "Atendente");
+            const globalIo = (global as any).io;
+            if (globalIo) {
+                globalIo.emit("attendance.update", { sessionId, jid, action: "accept", data: updated });
+                globalIo.to(sessionId).emit("attendance.update", { sessionId, jid, action: "accept", data: updated });
+            }
+        }
+    } catch (e) {
+        // non-fatal
+    }
 
     try {
         const buffer = Buffer.from(await file.arrayBuffer());

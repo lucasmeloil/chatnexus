@@ -16,8 +16,8 @@ export function SessionGuard({ children }: { children: ReactNode }) {
     if (!sessionId) {
         return (
             <div className="flex h-full flex-col items-center justify-center space-y-6 text-center p-8">
-                <div className="rounded-full bg-green-100 p-6">
-                    <QrCode className="h-12 w-12 text-green-600" />
+                <div className="rounded-full bg-blue-100 dark:bg-blue-950/40 p-6">
+                    <QrCode className="h-12 w-12 text-blue-600 dark:text-blue-400" />
                 </div>
                 <div className="space-y-2 max-w-md">
                     <h2 className="text-2xl font-bold tracking-tight">No Active Session</h2>

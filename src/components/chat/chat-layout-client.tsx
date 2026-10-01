@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { ChatList } from "./chat-list";
 import { ChatWindow } from "./chat-window";
 import { MessageCircle } from "lucide-react";
+import { formatToBrazilPhoneJid } from "@/lib/jid-utils";
+import { setActiveOpenChatJid } from "@/lib/notification-sound";
 
 interface ChatLayoutClientProps {
     sessionId: string;
@@ -13,12 +15,42 @@ interface ChatLayoutClientProps {
 interface SelectedChat {
     jid: string;
     name?: string;
+    attendance?: any;
 }
 
 export function ChatLayoutClient({ sessionId, initialJid }: ChatLayoutClientProps) {
     const [selectedChat, setSelectedChat] = useState<SelectedChat | null>(
         initialJid ? { jid: initialJid } : null
     );
+
+    // Sync initialJid when prop changes
+    useEffect(() => {
+        if (initialJid) {
+            const resolved = initialJid.includes("@") ? initialJid : formatToBrazilPhoneJid(initialJid);
+            setSelectedChat({ jid: resolved });
+        }
+    }, [initialJid]);
+
+    // Broadcast active chat JID so notifications for the open chat can be muted
+    useEffect(() => {
+        setActiveOpenChatJid(selectedChat?.jid || null);
+        return () => {
+            setActiveOpenChatJid(null);
+        };
+    }, [selectedChat]);
+
+    // Handle instant in-place conversation opening from floating notification banner
+    useEffect(() => {
+        const handleOpenChat = (e: any) => {
+            const jid = e.detail?.jid;
+            if (jid) {
+                const resolved = jid.includes("@") ? jid : formatToBrazilPhoneJid(jid);
+                setSelectedChat({ jid: resolved, name: e.detail?.name });
+            }
+        };
+        window.addEventListener("nexus:open-chat", handleOpenChat as EventListener);
+        return () => window.removeEventListener("nexus:open-chat", handleOpenChat as EventListener);
+    }, []);
 
     // Sync selected chat to URL pathname
     useEffect(() => {
@@ -43,9 +75,9 @@ export function ChatLayoutClient({ sessionId, initialJid }: ChatLayoutClientProp
             const path = window.location.pathname;
             if (path.startsWith("/dashboard/chat/")) {
                 const rawJid = path.replace("/dashboard/chat/", "");
-                let clean = rawJid.replace(/\D/g, "");
-                if (clean.startsWith("0")) clean = "62" + clean.substring(1);
-                setSelectedChat({ jid: `${clean}@s.whatsapp.net` });
+                const decoded = decodeURIComponent(rawJid);
+                const resolved = decoded.includes("@") ? decoded : formatToBrazilPhoneJid(decoded);
+                setSelectedChat({ jid: resolved });
             } else {
                 setSelectedChat(null);
             }
@@ -54,8 +86,8 @@ export function ChatLayoutClient({ sessionId, initialJid }: ChatLayoutClientProp
         return () => window.removeEventListener("popstate", handlePopState);
     }, []);
 
-    const handleSelectChat = (jid: string, name?: string) => {
-        setSelectedChat({ jid, name });
+    const handleSelectChat = (jid: string, name?: string, attendance?: any) => {
+        setSelectedChat({ jid, name, attendance });
     };
 
     const handleBack = () => {
@@ -89,17 +121,17 @@ export function ChatLayoutClient({ sessionId, initialJid }: ChatLayoutClientProp
                         sessionId={sessionId}
                         jid={selectedChat.jid}
                         name={selectedChat.name}
+                        initialAttendance={selectedChat.attendance}
                         onBack={handleBack}
                     />
                 ) : (
-                    <div className="flex-1 flex items-center justify-center min-w-0 min-h-0">
-                        <div className="text-center p-6">
-                            <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center mx-auto mb-4">
-                                <MessageCircle className="h-8 w-8 text-muted-foreground/40" />
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                                Select a chat to start messaging
-                            </p>
+                    <div className="flex-1 flex flex-col items-center justify-center min-w-0 min-h-0 bg-background/50 select-none p-6">
+                        <div className="flex flex-col items-center justify-center max-w-sm text-center">
+                            <img
+                                src="/nexus-chat-logo.png"
+                                alt="Nexus Chat"
+                                className="h-16 sm:h-20 w-auto object-contain opacity-85 drop-shadow-sm transition-transform duration-300 hover:scale-105 pointer-events-none"
+                            />
                         </div>
                     </div>
                 )}

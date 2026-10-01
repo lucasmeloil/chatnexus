@@ -14,13 +14,13 @@ export default function SettingsPage() {
     const isSuperAdmin = (authSession?.user as any)?.role === "SUPERADMIN";
 
     const [systemConfig, setSystemConfig] = useState({
-        appName: "WA-AKG",
+        appName: process.env.NEXT_PUBLIC_APP_NAME || "NEXUS CHAT",
         logoUrl: "",
-        timezone: "Asia/Jakarta",
+        timezone: "America/Sao_Paulo",
         enableRegistration: true
     });
     const [systemLoading, setSystemLoading] = useState(false);
-    const [timezones, setTimezones] = useState<string[]>(["UTC", "Asia/Jakarta", "Asia/Makassar", "Asia/Jayapura"]);
+    const [timezones, setTimezones] = useState<string[]>(["America/Sao_Paulo", "UTC", "America/Manaus", "America/Belem", "America/Fortaleza", "America/Recife", "America/Cuiaba"]);
 
     useEffect(() => {
         try {
@@ -44,11 +44,11 @@ export default function SettingsPage() {
                 const data = responseData?.data;
                 if (data && !responseData.error) {
                     setSystemConfig({
-                        appName: data.appName || "WA-AKG",
+                        appName: data.appName || "NEXUS CHAT",
                         logoUrl: data.logoUrl || "",
                         // @ts-ignore
                         faviconUrl: data.faviconUrl || "/favicon.ico",
-                        timezone: data.timezone || "Asia/Jakarta",
+                        timezone: data.timezone || "America/Sao_Paulo",
                         enableRegistration: data.enableRegistration !== undefined ? data.enableRegistration : true
                     });
                 }

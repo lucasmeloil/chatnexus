@@ -3,10 +3,11 @@ import type { WASocket, WAMessage, Contact } from "@whiskeysockets/baileys";
 import { normalizeMessageContent } from "@whiskeysockets/baileys";
 import { onMessageReceived, onMessageSent, dispatchWebhook, downloadAndSaveMedia } from "@/lib/webhook";
 import { handleBotCommand, setSessionStartTime } from "../bot/command-handler";
-import { resolveToPhoneJid, isLidJid, normalizeJid } from "@/lib/jid-utils";
+import { resolveToPhoneJid, isLidJid, normalizeJid, formatToBrazilPhoneJid } from "@/lib/jid-utils";
 
 import { Server } from "socket.io";
 import { logger } from "@/lib/logger";
+import { AttendanceService } from "../attendance.service";
 
 export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server | null) => {
     // Set start time for uptime command
@@ -15,15 +16,27 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
     // First, get the database Session ID (cuid)
     let dbSessionId: string | null = null;
 
+    const getDbSessionId = async (): Promise<string | null> => {
+        if (dbSessionId) return dbSessionId;
+        try {
+            const session = await prisma.session.findUnique({
+                where: { sessionId },
+                select: { id: true }
+            });
+            if (session) {
+                dbSessionId = session.id;
+            }
+        } catch (e) {
+            logger.error("Store", `Failed to get dbSessionId for ${sessionId}`, e);
+        }
+        return dbSessionId;
+    };
+
     // Initialize by fetching the session ID
     (async () => {
-        const session = await prisma.session.findUnique({
-            where: { sessionId },
-            select: { id: true }
-        });
-        if (session) {
-            dbSessionId = session.id;
-            logger.info("Store", `Message store initialized for session ${sessionId} (db: ${dbSessionId})`);
+        const id = await getDbSessionId();
+        if (id) {
+            logger.info("Store", `Message store initialized for session ${sessionId} (db: ${id})`);
         } else {
             logger.error("Store", `Session ${sessionId} not found for message store`);
         }
@@ -37,39 +50,96 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
             logger.debug("Store", `Received ${messages.length} messages of type: ${type}`);
         }
 
+        // Only single or very small batches are genuine real-time messages.
+        // Large batches (> 5) indicate an offline catch-up dump where we should not sound alarms or spam auto-replies.
+        const isLiveNotify = type === 'notify' && messages.length <= 5;
+
+        // Instant broadcast for real-time contact messages (zero delay floating alerts & audio chimes)
+        if (isLiveNotify) {
+            for (const msg of messages) {
+                const jid = msg.key?.remoteJid;
+                if (!msg.key?.fromMe && jid && !jid.includes('status@broadcast')) {
+                    const altJid = msg.key?.remoteJidAlt;
+                    let effectiveJid = jid;
+                    if (isLidJid(jid)) {
+                        if (altJid && !isLidJid(altJid)) {
+                            effectiveJid = altJid;
+                        } else if (dbSessionId) {
+                            try {
+                                effectiveJid = await resolveToPhoneJid(jid, dbSessionId, altJid);
+                            } catch {}
+                        }
+                    }
+                    const finalJid = formatToBrazilPhoneJid(normalizeJid(effectiveJid));
+
+                    let previewText = "";
+                    let mType = "TEXT";
+                    if (msg.message) {
+                        const content = normalizeMessageContent(msg.message);
+                        if (content?.conversation) previewText = content.conversation;
+                        else if (content?.extendedTextMessage?.text) previewText = content.extendedTextMessage.text;
+                        else if (content?.imageMessage) { mType = "IMAGE"; previewText = content.imageMessage.caption || "📷 Foto recebida"; }
+                        else if (content?.videoMessage) { mType = "VIDEO"; previewText = content.videoMessage.caption || "🎥 Vídeo recebido"; }
+                        else if (content?.audioMessage) { mType = "AUDIO"; previewText = "🎵 Áudio recebido"; }
+                        else if (content?.documentMessage) { mType = "DOCUMENT"; previewText = content.documentMessage.fileName || "📄 Documento recebido"; }
+                        else if (content?.stickerMessage) { mType = "STICKER"; previewText = "🏷️ Figurinha recebida"; }
+                        else if (content?.locationMessage) { mType = "LOCATION"; previewText = "📍 Localização recebida"; }
+                        else if (content?.contactMessage) { mType = "CONTACT"; previewText = content.contactMessage.displayName || "👤 Contato compartilhado"; }
+                        else previewText = "Nova mensagem recebida";
+                    }
+
+                    const instantPayload = {
+                        sessionId,
+                        message: {
+                            keyId: msg.key.id,
+                            remoteJid: finalJid,
+                            pushName: msg.pushName || null,
+                            content: previewText,
+                            type: mType,
+                            timestamp: new Date().toISOString(),
+                            fromMe: false
+                        }
+                    };
+                    logger.info("Socket", `Instant incoming.message broadcast from ${finalJid} in session ${sessionId}`);
+                    io?.emit('incoming.message', instantPayload);
+                    io?.to(sessionId).emit('incoming.message', instantPayload);
+                }
+            }
+        }
+
         // Emit to socket room for real-time frontend updates
         if (type === 'notify' || type === 'append') {
             io?.to(sessionId).emit('message.upsert', { messages, type });
         }
 
         // Ensure we have the database session ID
-        if (!dbSessionId) {
-            const session = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
-            if (!session) return;
-            dbSessionId = session.id;
+        const currentDbSessionId = await getDbSessionId();
+        if (!currentDbSessionId) {
+            logger.warn("Store", `Skipping messages.upsert: DB session not found for ${sessionId}`);
+            return;
         }
 
         const processedMessages = [];
 
         // Fetch Bot Config for auto-read & welcome message
         const config = await prisma.botConfig.findUnique({
-            where: { sessionId: dbSessionId }
+            where: { sessionId: currentDbSessionId }
         });
 
         for (const msg of messages) {
             try {
-                // Auto Read Logic
-                if (type === 'notify' && (config as any)?.autoRead && !msg.key.fromMe) {
+                // Auto Read Logic (only for genuine real-time messages)
+                if (isLiveNotify && (config as any)?.autoRead && !msg.key.fromMe) {
                     await sock.readMessages([msg.key]);
                 }
 
-                const savedMessage = await processAndSaveMessage(msg, dbSessionId, sessionId, type === 'notify', sock, config, io);
+                const savedMessage = await processAndSaveMessage(msg, currentDbSessionId, sessionId, isLiveNotify, sock, config, io);
                 if (savedMessage) {
                     processedMessages.push(savedMessage);
                 }
 
-                // Execute Bot Commands (Only for Notify / New Messages)
-                if (type === 'notify' && savedMessage) {
+                // Execute Bot Commands (Only for genuine real-time live messages)
+                if (isLiveNotify && savedMessage) {
                     // Run in background, don't await strictly to not block saving
                     handleBotCommand(sock, sessionId, msg).catch(e => logger.error("Bot", "Bot Handler Error", e));
                 }
@@ -87,6 +157,19 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
             }));
             logger.debug("Socket", `Emitting message.update for ${serialized.length} messages in session ${sessionId}`);
             io?.to(sessionId).emit('message.update', serialized);
+
+            // Redundant global emission for sound and floating notification across all dashboard operators (only for live messages)
+            if (isLiveNotify) {
+                for (const m of serialized) {
+                    if (!m.fromMe) {
+                        logger.info("Socket", `Broadcasting incoming.message (post-save) from ${m.remoteJid} in session ${sessionId}`);
+                        io?.emit('incoming.message', {
+                            sessionId,
+                            message: m
+                        });
+                    }
+                }
+            }
         }
     });
 
@@ -94,26 +177,31 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
     sock.ev.on('messaging-history.set', async ({ messages, chats, contacts, isLatest }) => {
         logger.info("Store", `History sync: ${messages?.length || 0} messages, ${chats?.length || 0} chats, ${contacts?.length || 0} contacts, latest: ${isLatest}`);
 
-        // Ensure we have the database session ID
-        if (!dbSessionId) {
-            const session = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
-            if (!session) return;
-            dbSessionId = session.id;
+        const currentDbSessionId = await getDbSessionId();
+        if (!currentDbSessionId) {
+            logger.warn("Store", `Skipping history sync: DB session not found for ${sessionId}`);
+            return;
         }
 
-        // Save all historical messages
+        // Save historical messages without choking event loop or downloading expired media
         if (messages && messages.length > 0) {
             logger.info("Store", `Syncing ${messages.length} historical messages...`);
+            let count = 0;
             for (const msg of messages) {
                 try {
-                    await processAndSaveMessage(msg, dbSessionId, sessionId, false, sock, undefined, io);
+                    // triggerWebhook = false: skips media download, skips attendance queue, skips tag routing
+                    await processAndSaveMessage(msg, currentDbSessionId, sessionId, false, sock, undefined, io);
+                    count++;
+                    // Yield event loop every 50 messages so Baileys connection keep-alives and pings are never blocked
+                    if (count % 50 === 0) {
+                        await new Promise((resolve) => setImmediate(resolve));
+                    }
                 } catch (error) {
                     logger.error("Store", "Error saving historical message", error);
                 }
             }
             logger.success("Store", `Finished syncing ${messages.length} historical messages`);
         }
-
 
         // Note: Contacts and Chats are synced by src/modules/whatsapp/store/contacts.ts
         // We only handle messages here to avoid P2002 Unique Constraint Race Conditions.
@@ -281,9 +369,23 @@ async function processAndSaveMessage(
     const remoteJid = msg.key.remoteJid;
     const fromMe = msg.key.fromMe;
     const pushName = msg.pushName;
-    const timestamp = msg.messageTimestamp
-        ? new Date((typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp : Number(msg.messageTimestamp)) * 1000)
-        : new Date();
+    const parseTimestamp = (ts: any): Date => {
+        if (!ts) return new Date();
+        if (typeof ts === 'number') return new Date(ts * 1000);
+        if (typeof ts === 'string') {
+            const n = Number(ts);
+            if (!isNaN(n)) return new Date(n * 1000);
+        }
+        if (typeof ts?.toNumber === 'function') {
+            return new Date(ts.toNumber() * 1000);
+        }
+        if (typeof ts?.low === 'number') {
+            return new Date(ts.low * 1000);
+        }
+        const n = Number(ts);
+        return !isNaN(n) ? new Date(n * 1000) : new Date();
+    };
+    const timestamp = parseTimestamp(msg.messageTimestamp);
 
     // Filter out Protocol & Empty Messages
     if (!msg.message) return false;
@@ -458,7 +560,7 @@ async function processAndSaveMessage(
         senderJid = remoteJidAlt;
     }
 
-    // --- Normalize LID JIDs to @s.whatsapp.net ---
+    // --- Normalize LID JIDs to @s.whatsapp.net and canonicalize Brazilian phone numbers ---
     let normalizedRemoteJid = remoteJid;
     if (isLidJid(remoteJid)) {
         normalizedRemoteJid = await resolveToPhoneJid(remoteJid, dbSessionId, remoteJidAlt);
@@ -466,14 +568,24 @@ async function processAndSaveMessage(
     if (senderJid && isLidJid(senderJid)) {
         senderJid = await resolveToPhoneJid(senderJid, dbSessionId, remoteJidAlt);
     }
+    normalizedRemoteJid = formatToBrazilPhoneJid(normalizeJid(normalizedRemoteJid));
+    if (senderJid) {
+        senderJid = formatToBrazilPhoneJid(normalizeJid(senderJid));
+    }
 
 
-    // Download Media First (to save URL to DB)
+    // Download Media ONLY for live messages (triggerWebhook === true)
+    // NEVER eagerly download media for historical sync messages (their CDN tokens are expired and cause timeouts/disconnects)
     let fileUrl: string | null = null;
-    try {
-        fileUrl = await downloadAndSaveMedia(msg, sessionId);
-    } catch (e) {
-        logger.error("Store", "Error downloading media in store", e);
+    const isLive = triggerWebhook;
+    const isRecent = Math.abs(Date.now() - timestamp.getTime()) < 60 * 1000;
+
+    if (isLive && isRecent) {
+        try {
+            fileUrl = await downloadAndSaveMedia(msg, sessionId);
+        } catch (e) {
+            logger.error("Store", "Error downloading media in store", e);
+        }
     }
 
     // Extract contextInfo (quoted message ID)
@@ -493,10 +605,11 @@ async function processAndSaveMessage(
     }
 
     try {
+        const finalRemoteJid = normalizedRemoteJid;
         const newMessage = await prisma.message.create({
             data: {
                 sessionId: dbSessionId,
-                remoteJid: normalizeJid(normalizedRemoteJid),
+                remoteJid: finalRemoteJid,
                 senderJid,
                 fromMe: fromMe || false,
                 keyId,
@@ -511,7 +624,6 @@ async function processAndSaveMessage(
         });
         
         // Ensure contact exists (Upsert Contact)
-        const finalRemoteJid = normalizeJid(normalizedRemoteJid);
         if (remoteJid && !remoteJid.includes('@g.us') && !remoteJid.includes('status@broadcast')) {
             const contactJid = finalRemoteJid; // Use fully normalized JID
             const contactData: any = {
@@ -542,8 +654,114 @@ async function processAndSaveMessage(
                 } : {}
             });
 
+            // If contact has a designated routing tag, ensure chat is tagged (live messages only)
+            if (isLive) {
+                const contactTag = (contact.data as any)?.tag;
+                if (contactTag && typeof contactTag === 'string' && contactTag.trim()) {
+                    try {
+                        const tagName = contactTag.trim();
+                        const sessionRec = await prisma.session.findUnique({
+                            where: { id: dbSessionId },
+                            select: { sessionId: true }
+                        });
+                        if (sessionRec?.sessionId) {
+                            let label = await prisma.label.findUnique({
+                                where: { sessionId_name: { sessionId: sessionRec.sessionId, name: tagName } }
+                            });
+                            if (!label) {
+                                const colors = ["#10B981", "#3B82F6", "#8B5CF6", "#F59E0B", "#EF4444", "#EC4899", "#06B6D4"];
+                                const colorHex = colors[Math.floor(Math.random() * colors.length)];
+                                label = await prisma.label.create({
+                                    data: { sessionId: sessionRec.sessionId, name: tagName, colorHex }
+                                });
+                            }
+                            await prisma.chatLabel.upsert({
+                                where: { labelId_chatJid: { labelId: label.id, chatJid: finalRemoteJid } },
+                                create: { labelId: label.id, chatJid: finalRemoteJid },
+                                update: {}
+                            });
+                        }
+                    } catch (tagErr) {
+                        logger.debug("Store", "Non-fatal error ensuring contact tag on message:", tagErr);
+                    }
+                }
+            }
+
+            // Multi-attendant: Handle Attendance Queue (Em Espera / Reabertura automática)
+            // ONLY FOR LIVE INCOMING MESSAGES! Never for historical sync or outgoing messages!
+            const isBroadcast = finalRemoteJid.includes("status@broadcast") || finalRemoteJid.includes("@broadcast") || finalRemoteJid.includes("@newsletter");
+            if (isLive && !fromMe && !isBroadcast) {
+                try {
+                    const existingAtt = await AttendanceService.getAttendance(sessionId, finalRemoteJid);
+                    let attRecord: any = null;
+                    let isReopenedOrNew = false;
+
+                    if (existingAtt && existingAtt.status === "IN_PROGRESS") {
+                        // PRESERVE IN_PROGRESS! NEVER RESET TO WAITING!
+                        attRecord = existingAtt;
+                        const contactTag = (contact.data as any)?.tag;
+                        if (contactTag && !existingAtt.departmentTag) {
+                            await prisma.$executeRawUnsafe(
+                                `UPDATE \`ChatAttendance\` SET departmentTag = ? WHERE id = ?`,
+                                contactTag.trim(),
+                                existingAtt.id
+                            );
+                            attRecord.departmentTag = contactTag.trim();
+                        }
+                    } else if (existingAtt && existingAtt.status === "WAITING") {
+                        attRecord = existingAtt;
+                        const contactTag = (contact.data as any)?.tag;
+                        if (contactTag && !existingAtt.departmentTag) {
+                            await prisma.$executeRawUnsafe(
+                                `UPDATE \`ChatAttendance\` SET departmentTag = ? WHERE id = ?`,
+                                contactTag.trim(),
+                                existingAtt.id
+                            );
+                            attRecord.departmentTag = contactTag.trim();
+                        }
+                    } else {
+                        // Brand new or reopening from CLOSED
+                        attRecord = await AttendanceService.handleIncomingMessage(sessionId, finalRemoteJid);
+                        isReopenedOrNew = true;
+
+                        const contactTag = (contact.data as any)?.tag;
+                        if (contactTag && attRecord) {
+                            await prisma.$executeRawUnsafe(
+                                `UPDATE \`ChatAttendance\` SET departmentTag = COALESCE(departmentTag, ?) WHERE id = ?`,
+                                contactTag.trim(),
+                                attRecord.id
+                            );
+                            attRecord.departmentTag = attRecord.departmentTag || contactTag.trim();
+                        }
+                    }
+
+                    // Remove "Finalizado" label if present so it transitions out of finished
+                    const finLabels = await prisma.label.findMany({
+                        where: { sessionId, name: { equals: "Finalizado" } },
+                        select: { id: true }
+                    });
+                    if (finLabels.length > 0) {
+                        const targetJids = [finalRemoteJid, remoteJid];
+                        await prisma.chatLabel.deleteMany({
+                            where: {
+                                labelId: { in: finLabels.map(l => l.id) },
+                                chatJid: { in: targetJids }
+                            }
+                        });
+                    }
+
+                    // Only emit attendance.update if attendance was newly created in WAITING or reopened from CLOSED
+                    if (isReopenedOrNew && attRecord) {
+                        io?.emit("attendance.update", { sessionId, jid: finalRemoteJid, status: attRecord.status, data: attRecord });
+                        io?.to(sessionId).emit("attendance.update", { sessionId, jid: finalRemoteJid, status: attRecord.status, data: attRecord });
+                    }
+                } catch (attErr) {
+                    logger.debug("Store", "Non-fatal error updating attendance queue on message:", attErr);
+                }
+            }
+
             // Welcome Message Logic
-            if (!fromMe && triggerWebhook && config?.welcomeMessage && sock) {
+            if (isLive && !fromMe && config?.welcomeMessage && sock) {
                 // Let's check if message count for this contact is exactly 1 (the one we just saved)
                 const msgCount = await prisma.message.count({
                     where: { sessionId: dbSessionId, remoteJid: finalRemoteJid }
@@ -567,8 +785,8 @@ async function processAndSaveMessage(
 
         return newMessage;
     } catch (e: any) {
-        logger.error("Store", "Error saving message query", e);
-        throw e;
+        logger.error("Store", `Error saving message ${keyId}:`, e?.message || e);
+        return null;
     }
 }
 // Placeholder - verified that I need to find the logic first

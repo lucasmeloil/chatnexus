@@ -5,6 +5,7 @@ import { SidebarProvider } from "@/components/dashboard/sidebar-context";
 import { SidebarShell } from "@/components/dashboard/sidebar-shell";
 import { UpdateChecker } from "@/components/dashboard/update-checker";
 import { RegistrationWarning } from "@/components/dashboard/registration-warning";
+import { MessageNotificationListener } from "@/components/dashboard/message-notification-listener";
 import { prisma } from "@/lib/prisma";
 import { Toaster } from "sonner";
 import pkg from "../../../package.json";
@@ -16,14 +17,14 @@ export default async function DashboardLayout({
     children: React.ReactNode;
 }) {
     const session = await auth();
-    // @ts-ignore
     const systemConfig = await prisma.systemConfig.findUnique({ where: { id: "default" } });
-    const appName = systemConfig?.appName || "WA-AKG";
+    const appName = systemConfig?.appName || process.env.APP_NAME || "NEXUS CHAT";
     const registrationEnabled = systemConfig?.enableRegistration ?? true;
 
     return (
         <SessionProvider>
             <SidebarProvider>
+                <MessageNotificationListener />
                 <UpdateChecker />
                 <RegistrationWarning
                     role={session?.user?.role as string}

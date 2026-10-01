@@ -107,11 +107,21 @@ export async function PUT(
                 }
             }
         } else {
-            // Remove labels from chat
+            // Remove labels from chat (supporting both Brazilian 9-digit variants)
+            const targetJids = [decodedJid];
+            const digits = decodedJid.replace(/@.*$/, "").replace(/\D/g, "");
+            if (digits.startsWith("55")) {
+                if (digits.length === 13 && digits[4] === "9") {
+                    targetJids.push(`${digits.slice(0, 4)}${digits.slice(5)}@s.whatsapp.net`);
+                } else if (digits.length === 12) {
+                    targetJids.push(`${digits.slice(0, 4)}9${digits.slice(4)}@s.whatsapp.net`);
+                }
+            }
+
             await prisma.chatLabel.deleteMany({
                 where: {
                     labelId: { in: labelIds },
-                    chatJid: decodedJid
+                    chatJid: { in: targetJids }
                 }
             });
         }

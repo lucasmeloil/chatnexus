@@ -17,7 +17,7 @@ import { bindPpGuard } from "./store/ppguard";
 import { antispam } from "./antispam";
 import { logger } from "@/lib/logger";
 
-const MAX_RECONNECT_ATTEMPTS = 3;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 export class WhatsAppInstance {
     socket: WASocket | null = null;
@@ -43,6 +43,7 @@ export class WhatsAppInstance {
     }
 
     async init() {
+        this.isStopped = false;
         const sessionData = await prisma.session.findUnique({
             where: { sessionId: this.sessionId },
             include: { botConfig: true }
@@ -67,14 +68,44 @@ export class WhatsAppInstance {
             },
             browser: ["Ubuntu", "Chrome", "20.0.04"],
             markOnlineOnConnect: botConfig?.alwaysOnline ?? true,
-            syncFullHistory: true,
+            syncFullHistory: false,
+            connectTimeoutMs: 60000,
+            defaultQueryTimeoutMs: 60000,
+            keepAliveIntervalMs: 30000,
+            getMessage: async (key) => {
+                if (!key.id) return undefined;
+                try {
+                    const msg = await prisma.message.findFirst({
+                        where: {
+                            keyId: key.id,
+                            session: { sessionId: this.sessionId }
+                        },
+                        select: { content: true }
+                    });
+                    if (msg) {
+                        return {
+                            conversation: msg.content || ""
+                        };
+                    }
+                } catch {
+                    // ignore
+                }
+                return undefined;
+            }
         });
 
-        // Apply Anti-Spam Wrapper to sendMessage
+        // Apply Anti-Spam Wrapper to sendMessage safely
         const originalSendMessage = this.socket.sendMessage.bind(this.socket);
         const sessionId = this.sessionId;
         this.socket.sendMessage = async function (jid: string, content: any, options?: any) {
-            await antispam.enqueue(sessionId, jid, content);
+            try {
+                await Promise.race([
+                    antispam.enqueue(sessionId, jid, content),
+                    new Promise((resolve) => setTimeout(resolve, 2000))
+                ]);
+            } catch (err) {
+                logger.warn("Instance", `Antispam enqueue skipped for ${jid}:`, err);
+            }
             return originalSendMessage(jid, content, options);
         } as any;
 
@@ -156,6 +187,18 @@ export class WhatsAppInstance {
                     // Remove from memory manager
                     const { waManager } = require("./manager");
                     waManager.removeInstance(this.sessionId);
+                    return;
+                }
+
+                // If restart required (e.g. status code 515), Baileys demands a new connection as part of normal handshake
+                const isRestartRequired = code === DisconnectReason.restartRequired || code === 515;
+                if (isRestartRequired) {
+                    logger.info("Instance", `Session ${this.sessionId} requires restart (status 515/restartRequired). Reconnecting immediately...`);
+                    this.status = "CONNECTING";
+                    this.io?.to(this.sessionId).emit("connection.update", { status: "CONNECTING", qr: null });
+                    setTimeout(() => {
+                        if (!this.isStopped) this.init();
+                    }, 1000);
                     return;
                 }
 

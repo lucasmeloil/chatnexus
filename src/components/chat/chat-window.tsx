@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Send, Paperclip, ArrowLeft, FileText, Image as ImageIcon, Music, Video, Download, ArrowDown, CornerUpLeft, Copy, Trash2, Info, X } from "lucide-react";
+import { Send, Paperclip, ArrowLeft, FileText, Image as ImageIcon, Music, Video, Download, ArrowDown, CornerUpLeft, Copy, Trash2, Info, X, UserCheck, Edit2, Mic, Square, Loader2, CheckCircle2, ArrowRightLeft, Zap, Tag, Sparkles, RotateCcw, Lock, Clock, ShieldAlert, Check } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
     AlertDialog,
@@ -15,10 +16,21 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getChatMessages, sendChatMessage, sendMediaMessage } from "@/app/dashboard/chat/actions";
 import { useSocket } from "./socket-context";
+import { setActiveOpenChatJid, getActiveOpenChatJid } from "@/lib/notification-sound";
+import { isSameChatJid } from "@/lib/jid-utils";
+import { EmojiPicker } from "./emoji-picker";
 
 interface Message {
     id: string;
@@ -45,6 +57,13 @@ interface ChatWindowProps {
     sessionId: string;
     jid: string;
     name?: string;
+    initialAttendance?: {
+        id?: string;
+        status: "WAITING" | "IN_PROGRESS" | "CLOSED";
+        assignedUserId: string | null;
+        assignedUserName: string | null;
+        departmentTag?: string | null;
+    } | null;
     onBack?: () => void;
 }
 
@@ -88,20 +107,32 @@ function LazyVideo({ src }: { src: string }) {
 }
 
 function useDateLabel() {
-    const cache = useRef(new Map<string, string>());
-    return (timestamp: string): string => {
-        const cached = cache.current.get(timestamp);
-        if (cached) return cached;
-        const date = new Date(timestamp);
-        const now = new Date();
-        const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-        let label: string;
-        if (diffDays === 0) label = "Today";
-        else if (diffDays === 1) label = "Yesterday";
-        else label = date.toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' });
-        cache.current.set(timestamp, label);
-        return label;
-    };
+    return useCallback((d: any) => {
+        if (!d) return "";
+        const dateObj = d instanceof Date ? d : new Date(typeof d === "number" && d < 1e12 ? d * 1000 : d);
+        if (isNaN(dateObj.getTime())) return "";
+        const today = new Date();
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        if (dateObj.toDateString() === today.toDateString()) return "Hoje";
+        if (dateObj.toDateString() === yesterday.toDateString()) return "Ontem";
+        return dateObj.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    }, []);
+}
+
+function renderFormattedContent(content: string) {
+    if (!content) return null;
+    const parts = content.split(/(\*[^*\n]+\*)/g);
+    return parts.map((part, index) => {
+        if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+            return (
+                <strong key={index} className="font-bold underline-offset-1">
+                    {part.slice(1, -1)}
+                </strong>
+            );
+        }
+        return part;
+    });
 }
 
 function handleDownload(url: string, fileName: string) {
@@ -134,7 +165,7 @@ function ContextMenu({ state, onClose, onReply, onDelete }: { state: ContextMenu
 
     const items = [
         { label: "Reply", icon: CornerUpLeft, action: () => { onReply(state.msg); onClose(); } },
-        { label: "Copy", icon: Copy, action: () => { navigator.clipboard.writeText(state.msg.content || "").then(() => toast.success("Copied!")).catch(() => {}); onClose(); } },
+        { label: "Copy", icon: Copy, action: () => { navigator.clipboard.writeText(state.msg.content || "").then(() => toast.success("Copied!")).catch(() => { }); onClose(); } },
         { label: "Delete", icon: Trash2, action: () => { onDelete(state.msg); onClose(); }, dangerous: true },
         { label: "Info", icon: Info, action: () => { toast.info(`ID: ${state.msg.keyId}\nStatus: ${state.msg.status}\nTime: ${new Date(state.msg.timestamp).toLocaleString()}`); onClose(); } },
     ];
@@ -160,7 +191,7 @@ function ContextMenu({ state, onClose, onReply, onDelete }: { state: ContextMenu
 }
 
 // ─── Main Component ─────────────────
-export function ChatWindow({ sessionId, jid, name, onBack }: ChatWindowProps) {
+export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: ChatWindowProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -185,7 +216,481 @@ export function ChatWindow({ sessionId, jid, name, onBack }: ChatWindowProps) {
     // Context menu state
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
+    // Operator signature state
+    const { data: authSession } = useSession();
+    const [signOperator, setSignOperator] = useState<boolean>(true);
+    const [operatorName, setOperatorName] = useState<string>("");
+    const [isEditingOperator, setIsEditingOperator] = useState<boolean>(false);
+    const [customOperatorInput, setCustomOperatorInput] = useState<string>("");
+
+    // Voice recording state
+    const [isRecording, setIsRecording] = useState<boolean>(false);
+    const [recordingDuration, setRecordingDuration] = useState<number>(0);
+    const [isSendingAudio, setIsSendingAudio] = useState<boolean>(false);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+    const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const mediaStreamRef = useRef<MediaStream | null>(null);
+
+    // Cancel recording if switching chats or unmounting
+    useEffect(() => {
+        return () => {
+            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+                mediaRecorderRef.current.onstop = null;
+                mediaRecorderRef.current.stop();
+            }
+            if (mediaStreamRef.current) {
+                mediaStreamRef.current.getTracks().forEach(t => t.stop());
+                mediaStreamRef.current = null;
+            }
+        };
+    }, [jid]);
+
+    useEffect(() => {
+        const savedSign = localStorage.getItem("wa_sign_operator");
+        if (savedSign !== null) {
+            setSignOperator(savedSign === "true");
+        }
+        const savedName = localStorage.getItem("wa_operator_name");
+        if (savedName) {
+            setOperatorName(savedName);
+        } else if (authSession?.user?.name) {
+            setOperatorName(authSession.user.name);
+        }
+    }, [authSession?.user?.name]);
+
+    // Quick Replies state
+    const [quickReplies, setQuickReplies] = useState<any[]>([]);
+    const [quickReplyFilter, setQuickReplyFilter] = useState<string>("");
+    const [showQuickRepliesPopup, setShowQuickRepliesPopup] = useState<boolean>(false);
+    const [selectedQuickReplyIndex, setSelectedQuickReplyIndex] = useState<number>(0);
+
+    // Attendance & Multi-attendant isolation state
+    const [attendance, setAttendance] = useState<{
+        id?: string;
+        status: "WAITING" | "IN_PROGRESS" | "CLOSED";
+        assignedUserId: string | null;
+        assignedUserName: string | null;
+        departmentTag?: string | null;
+    } | null>(initialAttendance || null);
+
+    // Sync initialAttendance when prop changes
+    useEffect(() => {
+        if (initialAttendance) {
+            setAttendance(initialAttendance);
+            if (initialAttendance.status === "CLOSED") {
+                setIsChatFinalized(true);
+            } else if (initialAttendance.status === "IN_PROGRESS" || initialAttendance.status === "WAITING") {
+                setIsChatFinalized(false);
+            }
+        }
+    }, [initialAttendance]);
+
+    // Mark messages as read when opening this conversation
+    useEffect(() => {
+        if (!sessionId || !jid) return;
+        fetch(`/api/chat/${sessionId}/${encodeURIComponent(jid)}/read`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({})
+        }).catch(() => {});
+    }, [sessionId, jid]);
+
+    const currentUserId = authSession?.user?.id;
+    const currentUserRole = (authSession?.user as any)?.role;
+    const isSuperAdmin = currentUserRole === "SUPERADMIN";
+
+    // Privacy security rule: if another attendant accepted this chat, regular attendants cannot view or type!
+    const isLockedForMe = Boolean(
+        attendance &&
+        attendance.status === "IN_PROGRESS" &&
+        attendance.assignedUserId &&
+        attendance.assignedUserId !== currentUserId &&
+        !isSuperAdmin
+    );
+
+    // Finalizar Atendimento state
+    const [isFinishDialogOpen, setIsFinishDialogOpen] = useState<boolean>(false);
+    const [sendClosingMessage, setSendClosingMessage] = useState<boolean>(true);
+    const [closingMessageText, setClosingMessageText] = useState<string>("Atendimento finalizado com sucesso! A NEXUS SOFT TECH RESOLUÇÕA DO CHAMDO: '  ' . Se precisar de suporte, estaremos sempre à disposição.");
+    const [isFinishing, setIsFinishing] = useState<boolean>(false);
+    const [isChatFinalized, setIsChatFinalized] = useState<boolean>(initialAttendance?.status === "CLOSED");
+    const [finalizedLabelId, setFinalizedLabelId] = useState<string | null>(null);
+
+    // Transferir Atendimento state
+    const [isTransferDialogOpen, setIsTransferDialogOpen] = useState<boolean>(false);
+    const [availableAttendants, setAvailableAttendants] = useState<any[]>([]);
+    const [selectedAttendant, setSelectedAttendant] = useState<string>("QUEUE");
+    const [selectedDepartmentTag, setSelectedDepartmentTag] = useState<"Comercial" | "Financeiro" | "Pessoal" | "Suporte">("Comercial");
+    const [notifyCustomer, setNotifyCustomer] = useState<boolean>(true);
+    const [transferCustomerNote, setTransferCustomerNote] = useState<string>("Seu atendimento foi direcionado ao setor Comercial. Um momento, por favor!");
+    const [isTransferring, setIsTransferring] = useState<boolean>(false);
+
+    // Check attendance and labels for this chat
+    const checkChatStatus = useCallback(async () => {
+        if (!sessionId || !jid) return;
+        try {
+            const [labelsRes, attRes] = await Promise.all([
+                fetch(`/api/labels/${sessionId}/chats?jid=${encodeURIComponent(jid)}`),
+                fetch(`/api/attendance/${sessionId}`)
+            ]);
+
+            let hasFinLabel = false;
+            if (labelsRes.ok) {
+                const data = await labelsRes.json();
+                const list = data.data || [];
+                const fin = list.find((l: any) => l.labelName?.toLowerCase() === "finalizado");
+                hasFinLabel = !!fin;
+                setFinalizedLabelId(fin?.labelId || null);
+            }
+
+            if (attRes.ok) {
+                const data = await attRes.json();
+                const attendances = data.data?.attendances || [];
+                const found = attendances.find((a: any) => isSameChatJid(a.chatJid, jid));
+                if (found) {
+                    setAttendance(found);
+                    if (found.status === "CLOSED") {
+                        setIsChatFinalized(true);
+                    } else {
+                        // IN_PROGRESS or WAITING is NEVER finalized
+                        setIsChatFinalized(false);
+                    }
+                } else if (!initialAttendance) {
+                    setAttendance({
+                        status: "WAITING",
+                        assignedUserId: null,
+                        assignedUserName: null
+                    });
+                    setIsChatFinalized(hasFinLabel);
+                }
+            }
+        } catch (e) {
+            console.error("Failed to check chat status", e);
+        }
+    }, [sessionId, jid, initialAttendance]);
+
+    useEffect(() => {
+        checkChatStatus();
+        const handler = (e: any) => {
+            if (e.detail?.jid && isSameChatJid(e.detail.jid, jid)) {
+                checkChatStatus();
+            }
+        };
+        window.addEventListener("wa_labels_updated", handler);
+        return () => window.removeEventListener("wa_labels_updated", handler);
+    }, [checkChatStatus, jid]);
+
+    // Register this chat as the active open conversation
+    useEffect(() => {
+        setActiveOpenChatJid(jid);
+        return () => {
+            if (isSameChatJid(getActiveOpenChatJid(), jid)) {
+                setActiveOpenChatJid(null);
+            }
+        };
+    }, [jid]);
+
+    // Socket real-time attendance update
     const { getSocket, joinSession } = useSocket();
+    useEffect(() => {
+        const socket = getSocket();
+        if (!socket) return;
+        const handler = (payload: any) => {
+            const targetJid = payload.jid;
+            if (!targetJid) return;
+            if (isSameChatJid(jid, targetJid)) {
+                const newStatus = payload.status || payload.data?.status;
+
+                // CRITICAL PROTECTION: An in-progress chat must NEVER be downgraded to WAITING
+                // unless an attendant explicitly performed an action (action === "transfer" or "close")
+                setAttendance(prev => {
+                    if (prev?.status === "IN_PROGRESS" && newStatus === "WAITING" && payload.action !== "transfer" && payload.action !== "close") {
+                        return prev;
+                    }
+                    const finalStatus = newStatus || prev?.status || "WAITING";
+                    return {
+                        status: finalStatus,
+                        assignedUserId: payload.data ? payload.data.assignedUserId : (finalStatus === "WAITING" ? null : prev?.assignedUserId || null),
+                        assignedUserName: payload.data ? payload.data.assignedUserName : (finalStatus === "WAITING" ? null : prev?.assignedUserName || null),
+                        departmentTag: payload.data?.departmentTag ?? prev?.departmentTag
+                    };
+                });
+
+                if (newStatus === "CLOSED") {
+                    setIsChatFinalized(true);
+                } else if (newStatus === "WAITING" || newStatus === "IN_PROGRESS") {
+                    setIsChatFinalized(false);
+                }
+            }
+        };
+        socket.on("attendance.update", handler);
+        return () => { socket.off("attendance.update", handler); };
+    }, [sessionId, jid, getSocket]);
+
+    // Accept attendance handler
+    const handleAcceptAttendance = async () => {
+        try {
+            const res = await fetch(`/api/attendance/${sessionId}/action`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "accept", jid })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                toast.success("Atendimento aceito! Você agora é o atendente exclusivo desta conversa.");
+                setAttendance({
+                    status: "IN_PROGRESS",
+                    assignedUserId: currentUserId || null,
+                    assignedUserName: authSession?.user?.name || "Você"
+                });
+                setIsChatFinalized(false);
+                window.dispatchEvent(new CustomEvent("wa_labels_updated", { detail: { jid, action: "accept" } }));
+            } else {
+                toast.error(data.message || "Falha ao aceitar atendimento");
+            }
+        } catch {
+            toast.error("Falha ao aceitar atendimento");
+        }
+    };
+
+    // Reopen attendance
+    const handleReopenAttendance = async () => {
+        try {
+            setIsFinishing(true);
+            await fetch(`/api/attendance/${sessionId}/action`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "reopen", jid })
+            });
+
+            let targetLabelId = finalizedLabelId;
+            if (!targetLabelId) {
+                const res = await fetch(`/api/labels/${sessionId}`);
+                const data = await res.json();
+                const label = data.data?.labels?.find((l: any) => l.name.toLowerCase() === "finalizado");
+                targetLabelId = label?.id;
+            }
+
+            if (targetLabelId) {
+                await fetch(`/api/labels/${sessionId}/chat/${encodeURIComponent(jid)}/labels`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ labelIds: [targetLabelId], action: "remove" }),
+                });
+            }
+
+            setIsChatFinalized(false);
+            setFinalizedLabelId(null);
+            setAttendance({
+                status: "IN_PROGRESS",
+                assignedUserId: currentUserId || null,
+                assignedUserName: authSession?.user?.name || "Você"
+            });
+            toast.success("Atendimento reaberto com sucesso!");
+            window.dispatchEvent(new CustomEvent("wa_labels_updated", { detail: { jid, action: "reopen" } }));
+        } catch (err: any) {
+            toast.error("Falha ao reabrir atendimento");
+        } finally {
+            setIsFinishing(false);
+        }
+    };
+
+    // Load available attendants for transfer
+    useEffect(() => {
+        if (isTransferDialogOpen && sessionId) {
+            fetch(`/api/sessions/${sessionId}/attendants`)
+                .then(res => res.json())
+                .then(data => {
+                    const list = data.data || [];
+                    setAvailableAttendants(list);
+                    if (list.length > 0 && selectedAttendant === "QUEUE") {
+                        const other = list.find((a: any) => a.userId !== currentUserId) || list[0];
+                        if (other) setSelectedAttendant(other.userId);
+                    }
+                })
+                .catch(() => { });
+        }
+    }, [isTransferDialogOpen, sessionId, currentUserId, selectedAttendant]);
+
+    // Update default transfer note when department tag changes
+    useEffect(() => {
+        setTransferCustomerNote(`Seu atendimento foi direcionado ao setor ${selectedDepartmentTag}. Um momento, por favor!`);
+    }, [selectedDepartmentTag]);
+
+    // Load quick replies
+    useEffect(() => {
+        fetch("/api/quick-replies")
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) setQuickReplies(data.data || []);
+            })
+            .catch(() => { });
+    }, []);
+
+    // Helper: Assign label to current chat
+    const assignLabelToChat = async (labelName: string, colorHex: string = "#3b82f6") => {
+        try {
+            const res = await fetch(`/api/labels/${sessionId}`);
+            const data = await res.json();
+            let label = data.data?.labels?.find((l: any) => l.name.toLowerCase() === labelName.toLowerCase());
+
+            if (!label) {
+                const createRes = await fetch(`/api/labels/${sessionId}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: labelName, color: 0, colorHex }),
+                });
+                const createData = await createRes.json();
+                label = createData.data?.label || createData.data;
+            }
+
+            if (label?.id) {
+                await fetch(`/api/labels/${sessionId}/chat/${encodeURIComponent(jid)}/labels`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ labelIds: [label.id], action: "add" }),
+                });
+            }
+        } catch (err) {
+            console.error("Error assigning label:", err);
+        }
+    };
+
+    // Filter quick replies based on shortcut or query
+    const filteredQuickReplies = quickReplies.filter(r => {
+        if (!quickReplyFilter) return true;
+        const q = quickReplyFilter.toLowerCase();
+        return (
+            r.shortcut.toLowerCase().includes(q) ||
+            r.title.toLowerCase().includes(q) ||
+            r.content.toLowerCase().includes(q)
+        );
+    });
+
+    const applyQuickReply = (reply: any) => {
+        if (!reply) return;
+        const cursorPos = inputRef.current?.selectionStart || input.length;
+        const textBeforeCursor = input.slice(0, cursorPos);
+        const textAfterCursor = input.slice(cursorPos);
+        const newBefore = textBeforeCursor.replace(/(^|\s)\/([a-zA-Z0-9_\/]*)$/, `$1${reply.content} `);
+        const finalVal = newBefore === textBeforeCursor ? (input ? `${input}\n${reply.content}` : reply.content) : (newBefore + textAfterCursor);
+        setInput(finalVal);
+        setShowQuickRepliesPopup(false);
+        setQuickReplyFilter("");
+        setTimeout(() => {
+            if (inputRef.current) {
+                inputRef.current.focus();
+                inputRef.current.style.height = "auto";
+                inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 120) + "px";
+            }
+        }, 50);
+    };
+
+    const handleFinishAttendance = async () => {
+        try {
+            setIsFinishing(true);
+            if (sendClosingMessage && closingMessageText.trim()) {
+                const activeName = (operatorName || authSession?.user?.name || "").trim();
+                let msgContent = closingMessageText.trim();
+                if (signOperator && activeName) {
+                    msgContent = `*${activeName}*\n${msgContent}`;
+                }
+                await sendChatMessage(sessionId, jid, msgContent);
+                setTimeout(() => fetchMessages(), 600);
+            }
+
+            // Call attendance close endpoint
+            await fetch(`/api/attendance/${sessionId}/action`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "close", jid })
+            });
+
+            await assignLabelToChat("Finalizado", "#10b981");
+            setIsChatFinalized(true);
+            setAttendance(prev => ({
+                status: "CLOSED",
+                assignedUserId: null,
+                assignedUserName: null,
+                departmentTag: prev?.departmentTag
+            }));
+            toast.success("Atendimento finalizado com sucesso!");
+            window.dispatchEvent(new CustomEvent("wa_labels_updated", { detail: { jid, action: "finalize" } }));
+            setIsFinishDialogOpen(false);
+        } catch (err: any) {
+            toast.error(err.message || "Falha ao finalizar atendimento");
+        } finally {
+            setIsFinishing(false);
+        }
+    };
+
+    const handleTransferAttendance = async () => {
+        try {
+            setIsTransferring(true);
+            const isQueue = selectedAttendant === "QUEUE" || !selectedAttendant;
+            const targetUser = availableAttendants.find(a => a.userId === selectedAttendant);
+            const targetName = isQueue ? null : (targetUser?.name || "outro atendente");
+
+            // Call attendance transfer action
+            await fetch(`/api/attendance/${sessionId}/action`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    action: "transfer",
+                    jid,
+                    targetUserId: isQueue ? null : selectedAttendant,
+                    targetUserName: targetName,
+                    departmentTag: selectedDepartmentTag
+                })
+            });
+
+            const tagColors: Record<string, string> = {
+                "Comercial": "#3b82f6",
+                "Financeiro": "#f59e0b",
+                "Pessoal": "#8b5cf6",
+                "Suporte": "#10b981"
+            };
+            await assignLabelToChat(selectedDepartmentTag, tagColors[selectedDepartmentTag] || "#3b82f6");
+
+            if (notifyCustomer && transferCustomerNote.trim()) {
+                const activeName = (operatorName || authSession?.user?.name || "").trim();
+                let msgContent = transferCustomerNote.trim();
+                if (signOperator && activeName) {
+                    msgContent = `*${activeName}*\n${msgContent}`;
+                }
+                await sendChatMessage(sessionId, jid, msgContent);
+                setTimeout(() => fetchMessages(), 600);
+            }
+
+            if (isQueue) {
+                toast.success("Atendimento devolvido para a Fila de Espera!");
+                setAttendance({
+                    status: "WAITING",
+                    assignedUserId: null,
+                    assignedUserName: null,
+                    departmentTag: selectedDepartmentTag
+                });
+            } else {
+                toast.success(`Atendimento transferido para ${targetName} [${selectedDepartmentTag}]!`);
+                setAttendance({
+                    status: "IN_PROGRESS",
+                    assignedUserId: selectedAttendant,
+                    assignedUserName: targetName,
+                    departmentTag: selectedDepartmentTag
+                });
+            }
+
+            window.dispatchEvent(new CustomEvent("wa_labels_updated", { detail: { jid, action: "transfer" } }));
+            setIsTransferDialogOpen(false);
+        } catch (err: any) {
+            toast.error(err.message || "Falha ao transferir atendimento");
+        } finally {
+            setIsTransferring(false);
+        }
+    };
+
     const getDateLabel = useDateLabel();
 
     const scrollToBottom = useCallback((smooth = true) => {
@@ -255,16 +760,86 @@ export function ChatWindow({ sessionId, jid, name, onBack }: ChatWindowProps) {
     }, [hasMore, loadingMore, oldestTimestamp, fetchMessages]);
 
     const handleSend = async () => {
+        if (isChatFinalized) {
+            toast.warning("Este atendimento está finalizado. Reabra o atendimento para enviar mensagens.");
+            return;
+        }
         if (!input.trim()) return;
+        const activeName = (operatorName || authSession?.user?.name || "").trim();
+        let messageToSend = input.trim();
+        if (signOperator && activeName) {
+            messageToSend = `*${activeName}*\n${messageToSend}`;
+        }
         try {
-            await sendChatMessage(sessionId, jid, input, replyingTo?.keyId);
+            await sendChatMessage(sessionId, jid, messageToSend, replyingTo?.keyId);
             setInput("");
             setReplyingTo(null);
             setTimeout(() => fetchMessages(), 800);
-        } catch (e: any) { toast.error(e.message || "Failed to send"); }
+        } catch (e: any) { toast.error(e.message || "Falha ao enviar mensagem"); }
+    };
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const val = e.target.value;
+        setInput(val);
+        const el = e.target;
+        el.style.height = "auto";
+        el.style.height = Math.min(el.scrollHeight, 120) + "px";
+
+        const cursorPos = e.target.selectionStart || val.length;
+        const textBeforeCursor = val.slice(0, cursorPos);
+        const match = textBeforeCursor.match(/(^|\s)\/([a-zA-Z0-9_\/]*)$/);
+
+        if (match) {
+            setQuickReplyFilter(match[2]);
+            setShowQuickRepliesPopup(true);
+            setSelectedQuickReplyIndex(0);
+        } else {
+            setShowQuickRepliesPopup(false);
+        }
+    };
+
+    const handleInsertEmoji = (emoji: string) => {
+        if (!inputRef.current) {
+            setInput(prev => prev + emoji);
+            return;
+        }
+        const textarea = inputRef.current;
+        const start = textarea.selectionStart || 0;
+        const end = textarea.selectionEnd || 0;
+        const newText = input.substring(0, start) + emoji + input.substring(end);
+        setInput(newText);
+        requestAnimationFrame(() => {
+            textarea.focus();
+            const newPos = start + emoji.length;
+            textarea.setSelectionRange(newPos, newPos);
+            textarea.style.height = "auto";
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + "px";
+        });
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (showQuickRepliesPopup && filteredQuickReplies.length > 0) {
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSelectedQuickReplyIndex(prev => (prev + 1) % filteredQuickReplies.length);
+                return;
+            }
+            if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSelectedQuickReplyIndex(prev => (prev - 1 + filteredQuickReplies.length) % filteredQuickReplies.length);
+                return;
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                applyQuickReply(filteredQuickReplies[selectedQuickReplyIndex]);
+                return;
+            }
+            if (e.key === "Escape") {
+                e.preventDefault();
+                setShowQuickRepliesPopup(false);
+                return;
+            }
+        }
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
     };
 
@@ -296,6 +871,10 @@ export function ChatWindow({ sessionId, jid, name, onBack }: ChatWindowProps) {
     }, [replyingTo]);
 
     const processFileUpload = async (file: File, explicitType?: string) => {
+        if (isChatFinalized) {
+            toast.warning("Este atendimento está finalizado. Reabra o atendimento para enviar arquivos.");
+            return;
+        }
         const formData = new FormData();
         formData.append("file", file);
         let type = explicitType;
@@ -324,11 +903,151 @@ export function ChatWindow({ sessionId, jid, name, onBack }: ChatWindowProps) {
     };
 
     const triggerUpload = (type: string) => {
+        if (isChatFinalized) {
+            toast.warning("Este atendimento está finalizado. Reabra o atendimento para enviar arquivos.");
+            return;
+        }
         setUploadType(type);
         if (fileInputRef.current) {
             fileInputRef.current.accept = type === 'image' ? "image/*" : type === 'video' ? "video/*" : type === 'audio' ? "audio/*" : "*/*";
             fileInputRef.current.click();
         }
+    };
+
+    // Voice Recording Handlers
+    const startRecording = async () => {
+        if (isChatFinalized) {
+            toast.warning("Este atendimento está finalizado. Reabra o atendimento para enviar mensagens de voz.");
+            return;
+        }
+        try {
+            if (!navigator?.mediaDevices?.getUserMedia) {
+                toast.error("Seu navegador não suporta gravação de áudio ou o microfone não está disponível.");
+                return;
+            }
+
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaStreamRef.current = stream;
+
+            // Pick supported mime type for highest compatibility with WhatsApp
+            let mimeType = "audio/webm;codecs=opus";
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = "audio/ogg;codecs=opus";
+            }
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = "audio/mp4";
+            }
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = "";
+            }
+
+            const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+            mediaRecorderRef.current = recorder;
+            audioChunksRef.current = [];
+
+            recorder.ondataavailable = (event) => {
+                if (event.data && event.data.size > 0) {
+                    audioChunksRef.current.push(event.data);
+                }
+            };
+
+            recorder.start(250); // Collect data chunks every 250ms
+            setIsRecording(true);
+            setRecordingDuration(0);
+
+            if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = setInterval(() => {
+                setRecordingDuration(prev => prev + 1);
+            }, 1000);
+
+            toast.info("Gravando áudio... Fale no microfone.", { duration: 2000 });
+        } catch (err: any) {
+            console.error("Microphone access error:", err);
+            toast.error("Não foi possível acessar o microfone. Verifique as permissões de áudio do seu navegador.");
+        }
+    };
+
+    const cancelRecording = () => {
+        if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+        }
+
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+            mediaRecorderRef.current.onstop = null;
+            mediaRecorderRef.current.stop();
+        }
+
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach(track => track.stop());
+            mediaStreamRef.current = null;
+        }
+
+        audioChunksRef.current = [];
+        setIsRecording(false);
+        setRecordingDuration(0);
+        toast.info("Gravação de áudio cancelada");
+    };
+
+    const stopAndSendRecording = () => {
+        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === "inactive") return;
+
+        if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+        }
+
+        setIsSendingAudio(true);
+        const recorder = mediaRecorderRef.current;
+        const mimeType = recorder.mimeType || "audio/ogg;codecs=opus";
+
+        recorder.onstop = async () => {
+            try {
+                if (mediaStreamRef.current) {
+                    mediaStreamRef.current.getTracks().forEach(track => track.stop());
+                    mediaStreamRef.current = null;
+                }
+
+                const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+                if (audioBlob.size < 500) {
+                    toast.error("Áudio muito curto ou vazio.");
+                    setIsSendingAudio(false);
+                    setIsRecording(false);
+                    setRecordingDuration(0);
+                    return;
+                }
+
+                const ext = mimeType.includes("ogg") ? "ogg" : (mimeType.includes("mp4") ? "m4a" : "ogg");
+                const audioFile = new File([audioBlob], `voz_${Date.now()}.${ext}`, { type: mimeType });
+
+                const formData = new FormData();
+                formData.append("file", audioFile);
+                formData.append("type", "voice");
+                formData.append("sessionId", sessionId);
+                formData.append("jid", jid);
+
+                toast.info("Enviando áudio...");
+                await sendMediaMessage(formData);
+                toast.success("Mensagem de voz enviada com sucesso!");
+                setTimeout(() => fetchMessages(), 800);
+            } catch (err: any) {
+                console.error("Error sending voice message:", err);
+                toast.error(err.message || "Falha ao enviar áudio");
+            } finally {
+                setIsSendingAudio(false);
+                setIsRecording(false);
+                setRecordingDuration(0);
+                audioChunksRef.current = [];
+            }
+        };
+
+        recorder.stop();
+    };
+
+    const formatDuration = (totalSeconds: number) => {
+        const mins = Math.floor(totalSeconds / 60);
+        const secs = totalSeconds % 60;
+        return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
     };
 
     // Right-click handler
@@ -418,13 +1137,328 @@ export function ChatWindow({ sessionId, jid, name, onBack }: ChatWindowProps) {
                     </AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-semibold text-foreground truncate">{displayName}</h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-semibold text-foreground truncate">{displayName}</h3>
+                        {attendance?.status === "WAITING" && !isChatFinalized && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1 shrink-0">
+                                <Clock className="h-3 w-3 animate-pulse" /> Em Espera
+                            </span>
+                        )}
+                        {attendance?.status === "IN_PROGRESS" && !isChatFinalized && (
+                            attendance.assignedUserId === currentUserId ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1 shrink-0">
+                                    <UserCheck className="h-3 w-3" /> Em Atendimento (Você)
+                                </span>
+                            ) : (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex items-center gap-1 shrink-0">
+                                    <Lock className="h-3 w-3" /> Atendido por {attendance.assignedUserName || "Outro Atendente"}
+                                </span>
+                            )
+                        )}
+                        {isChatFinalized && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1 shrink-0">
+                                <CheckCircle2 className="h-3 w-3" /> Finalizado
+                            </span>
+                        )}
+                    </div>
                     <p className="text-[10px] text-muted-foreground truncate">{jid}</p>
+                </div>
+
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                    {attendance?.status === "WAITING" && !isChatFinalized && (
+                        <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleAcceptAttendance}
+                            className="h-8 px-2.5 sm:px-3 text-xs gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs transition-all font-semibold"
+                            title="Aceitar atendimento deste cliente"
+                        >
+                            <Check className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Aceitar Atendimento</span>
+                        </Button>
+                    )}
+
+                    {!isLockedForMe && (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsTransferDialogOpen(true)}
+                            className="h-8 px-2.5 sm:px-3 text-xs gap-1.5 rounded-lg border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 cursor-pointer shadow-xs transition-all"
+                            title="Transferir atendimento para outro atendente ou setor"
+                        >
+                            <ArrowRightLeft className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline font-medium">Transferir</span>
+                        </Button>
+                    )}
+
+                    {isChatFinalized ? (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={isFinishing}
+                            onClick={handleReopenAttendance}
+                            className="h-8 px-2.5 sm:px-3 text-xs gap-1.5 rounded-lg border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 cursor-pointer shadow-xs transition-all font-semibold"
+                            title="Reabrir este atendimento"
+                        >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Reabrir Atendimento</span>
+                        </Button>
+                    ) : (
+                        !isLockedForMe && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setIsFinishDialogOpen(true)}
+                                className="h-8 px-2.5 sm:px-3 text-xs gap-1.5 rounded-lg border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 cursor-pointer shadow-xs transition-all font-semibold"
+                                title="Finalizar atendimento atual"
+                            >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Finalizar Atendimento</span>
+                            </Button>
+                        )
+                    )}
                 </div>
             </div>
 
-            {/* Messages */}
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 min-h-0 styled-scrollbar" onScroll={handleScroll}
+            {/* Waiting banner */}
+            {attendance?.status === "WAITING" && !isChatFinalized && (
+                <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/20 px-3.5 py-2 flex items-center justify-between gap-3 text-xs text-amber-800 dark:text-amber-200">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 animate-pulse" />
+                        <span className="truncate sm:whitespace-normal">
+                            <strong>Atendimento em Espera:</strong> Este cliente aguarda um atendente. Clique em &quot;Aceitar Atendimento&quot; para iniciar com exclusividade.
+                        </span>
+                    </div>
+                    <Button
+                        size="sm"
+                        onClick={handleAcceptAttendance}
+                        className="h-7 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold shrink-0 cursor-pointer shadow-xs"
+                    >
+                        Aceitar Atendimento
+                    </Button>
+                </div>
+            )}
+
+            {/* Dialog Finalizar Atendimento */}
+            <Dialog open={isFinishDialogOpen} onOpenChange={setIsFinishDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-base text-blue-600 dark:text-blue-400">
+                            <CheckCircle2 className="h-5 w-5" /> Finalizar Atendimento
+                        </DialogTitle>
+                        <DialogDescription className="text-xs text-muted-foreground">
+                            Deseja encerrar o atendimento com <strong>{displayName}</strong>? O contato será marcado com a etiqueta <strong>#Finalizado</strong>.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3 py-2 text-xs">
+                        <label className="flex items-center gap-2 cursor-pointer font-medium text-foreground">
+                            <input
+                                type="checkbox"
+                                checked={sendClosingMessage}
+                                onChange={(e) => setSendClosingMessage(e.target.checked)}
+                                className="rounded border-border text-blue-600 focus:ring-blue-500"
+                            />
+                            Enviar mensagem de encerramento para o cliente
+                        </label>
+
+                        {sendClosingMessage && (
+                            <div className="space-y-1">
+                                <label className="text-[11px] text-muted-foreground font-medium">Mensagem de Encerramento:</label>
+                                <textarea
+                                    value={closingMessageText}
+                                    onChange={(e) => setClosingMessageText(e.target.value)}
+                                    rows={3}
+                                    className="w-full rounded-lg border border-border/50 bg-background p-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed"
+                                />
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsFinishDialogOpen(false)}
+                            className="text-xs"
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            disabled={isFinishing}
+                            onClick={handleFinishAttendance}
+                            className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5 text-xs"
+                        >
+                            {isFinishing ? (
+                                <>
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Finalizando...
+                                </>
+                            ) : (
+                                <>
+                                    <CheckCircle2 className="h-3.5 w-3.5" /> Confirmar e Finalizar
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog Transferir Atendimento */}
+            <Dialog open={isTransferDialogOpen} onOpenChange={setIsTransferDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-base text-blue-600 dark:text-blue-400">
+                            <ArrowRightLeft className="h-5 w-5" /> Transferir Atendimento
+                        </DialogTitle>
+                        <DialogDescription className="text-xs text-muted-foreground">
+                            Transfira o atendimento de <strong>{displayName}</strong> para outro atendente ou setor cadastrado.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-3 py-2 text-xs">
+                        {/* Sector / Department Tag Picker (required: comercial, pessoal, financeiro) */}
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-foreground">
+                                Setor de Destino (Etiqueta) <span className="text-red-500">*</span>
+                            </label>
+                            <div className="grid grid-cols-3 gap-2">
+                                {[
+                                    { id: "Comercial", label: "Comercial", color: "border-blue-500/50 text-blue-600 dark:text-blue-400 bg-blue-500/10" },
+                                    { id: "Pessoal", label: "Pessoal", color: "border-purple-500/50 text-purple-600 dark:text-purple-400 bg-purple-500/10" },
+                                    { id: "Financeiro", label: "Financeiro", color: "border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10" },
+                                ].map((dept) => {
+                                    const isSelected = selectedDepartmentTag === dept.id;
+                                    return (
+                                        <button
+                                            key={dept.id}
+                                            type="button"
+                                            onClick={() => setSelectedDepartmentTag(dept.id as any)}
+                                            className={cn(
+                                                "p-2 rounded-lg border text-xs font-semibold transition-all text-center flex flex-col items-center justify-center gap-1 cursor-pointer",
+                                                isSelected
+                                                    ? `${dept.color} ring-2 ring-primary/40 font-bold shadow-xs`
+                                                    : "border-border/60 hover:bg-muted text-muted-foreground"
+                                            )}
+                                        >
+                                            <Tag className="h-3.5 w-3.5" />
+                                            <span>{dept.label}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* Target Attendant Picker */}
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-foreground">
+                                Atendente / Linha de Destino
+                            </label>
+                            <select
+                                value={selectedAttendant}
+                                onChange={(e) => setSelectedAttendant(e.target.value)}
+                                className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                            >
+                                <option value="QUEUE">🔄 Devolver para a Fila de Espera (Qualquer Atendente)</option>
+                                {availableAttendants.length > 0 && (
+                                    <optgroup label="Atendentes da Equipe">
+                                        {availableAttendants.map((a: any) => (
+                                            <option key={a.userId} value={a.userId}>
+                                                👤 {a.name} ({a.email || a.role}) {a.userId === currentUserId ? "(Você)" : ""}
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                            </select>
+                        </div>
+
+                        {/* Notify customer checkbox and note */}
+                        <label className="flex items-center gap-2 cursor-pointer font-medium text-foreground pt-1">
+                            <input
+                                type="checkbox"
+                                checked={notifyCustomer}
+                                onChange={(e) => setNotifyCustomer(e.target.checked)}
+                                className="rounded border-border text-blue-600 focus:ring-blue-500"
+                            />
+                            Avisar o cliente sobre a transferência
+                        </label>
+
+                        {notifyCustomer && (
+                            <div className="space-y-1">
+                                <label className="text-[11px] text-muted-foreground font-medium">Mensagem para o cliente:</label>
+                                <textarea
+                                    value={transferCustomerNote}
+                                    onChange={(e) => setTransferCustomerNote(e.target.value)}
+                                    rows={2}
+                                    className="w-full rounded-lg border border-border/50 bg-background p-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed"
+                                />
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsTransferDialogOpen(false)}
+                            className="text-xs"
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            disabled={isTransferring}
+                            onClick={handleTransferAttendance}
+                            className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5 text-xs"
+                        >
+                            {isTransferring ? (
+                                <>
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Transferindo...
+                                </>
+                            ) : (
+                                <>
+                                    <ArrowRightLeft className="h-3.5 w-3.5" /> Confirmar Transferência
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* If attendance is exclusive to another attendant, show Privacy Barrier */}
+            {isLockedForMe ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-background/50 backdrop-blur-xs select-none">
+                    <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 mb-4 shadow-sm">
+                        <Lock className="h-8 w-8" />
+                    </div>
+                    <h3 className="text-base font-bold text-foreground mb-1">
+                        Atendimento Privado em Andamento
+                    </h3>
+                    <p className="text-xs text-muted-foreground max-w-md mb-4 leading-relaxed">
+                        Esta conversa está sob atendimento exclusivo de{" "}
+                        <span className="font-semibold text-foreground underline decoration-primary">
+                            {attendance?.assignedUserName || "outro atendente"}
+                        </span>.
+                        Por motivos de segurança e organização, as mensagens e o envio estão visíveis apenas ao atendente responsável.
+                    </p>
+                    <div className="p-3 rounded-xl bg-muted/50 border border-border/40 text-[11px] text-muted-foreground max-w-sm text-left flex items-start gap-2.5">
+                        <ShieldAlert className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+                        <span>
+                            O atendente atual pode transferir esta conversa diretamente para você ou devolvê-la para a fila de espera quando necessário.
+                        </span>
+                    </div>
+                </div>
+            ) : (
+                <>
+                    {/* Messages */}
+                    <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 min-h-0 styled-scrollbar" onScroll={handleScroll}
                 style={{ backgroundImage: `radial-gradient(circle at 1px 1px, hsl(var(--muted-foreground) / 0.04) 1px, transparent 0)`, backgroundSize: '24px 24px' }}
             >
                 <div className="flex flex-col gap-3 max-w-3xl mx-auto">
@@ -469,11 +1503,11 @@ export function ChatWindow({ sessionId, jid, name, onBack }: ChatWindowProps) {
                                             <span className="text-[10px] font-semibold text-primary block mb-0.5">{msg.pushName}</span>
                                         )}
                                         {msg.quoted && (
-                                            <div 
+                                            <div
                                                 className={cn(
                                                     "mb-1.5 px-2 py-1 rounded-lg border-l-4 text-xs select-none cursor-pointer text-left bg-muted/40",
-                                                    msg.fromMe 
-                                                        ? "border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground/90 hover:bg-primary-foreground/15" 
+                                                    msg.fromMe
+                                                        ? "border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground/90 hover:bg-primary-foreground/15"
                                                         : "border-primary bg-muted text-muted-foreground hover:bg-muted/60"
                                                 )}
                                                 onClick={(e) => {
@@ -541,7 +1575,7 @@ export function ChatWindow({ sessionId, jid, name, onBack }: ChatWindowProps) {
                                         )}
                                         {/* Text */}
                                         <div className="flex items-end gap-2">
-                                            <span className="flex-1 text-sm break-all whitespace-pre-wrap">{msg.content}</span>
+                                            <span className="flex-1 text-sm break-all whitespace-pre-wrap">{renderFormattedContent(msg.content)}</span>
                                             <span className={cn("text-[9px] shrink-0 leading-none", msg.fromMe ? "text-primary-foreground/60" : "text-muted-foreground")}>
                                                 {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                             </span>
@@ -572,44 +1606,336 @@ export function ChatWindow({ sessionId, jid, name, onBack }: ChatWindowProps) {
             )}
 
             {/* Input */}
-            <div className="shrink-0 px-3 py-2.5 bg-background/80 backdrop-blur-sm border-t">
-                <div className="flex items-center gap-2 max-w-3xl mx-auto">
-                    <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full shrink-0 text-muted-foreground hover:text-foreground"><Paperclip className="h-4.5 w-4.5" /></Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-44 p-1.5" side="top" align="start">
-                            <div className="flex flex-col gap-0.5">
-                                <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs" onClick={() => triggerUpload('image')}><ImageIcon className="h-3.5 w-3.5 text-blue-500" /> Image</Button>
-                                <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs" onClick={() => triggerUpload('video')}><Video className="h-3.5 w-3.5 text-purple-500" /> Video</Button>
-                                <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs" onClick={() => triggerUpload('audio')}><Music className="h-3.5 w-3.5 text-orange-500" /> Audio</Button>
-                                <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs" onClick={() => triggerUpload('document')}><FileText className="h-3.5 w-3.5 text-emerald-500" /> Document</Button>
-                            </div>
-                        </PopoverContent>
-                    </Popover>
+            <div className="shrink-0 px-3 py-2 bg-background/80 backdrop-blur-sm border-t space-y-1.5">
+                {/* Operator signature control bar */}
+                <div className="flex items-center justify-between px-1 text-xs">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                const next = !signOperator;
+                                setSignOperator(next);
+                                localStorage.setItem("wa_sign_operator", String(next));
+                            }}
+                            className={cn(
+                                "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors border cursor-pointer",
+                                signOperator
+                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20"
+                                    : "bg-muted text-muted-foreground border-border/50 hover:bg-muted/80"
+                            )}
+                            title="Clique para ativar/desativar assinatura do operador na mensagem"
+                        >
+                            <UserCheck className="h-3.5 w-3.5" />
+                            <span>
+                                {signOperator ? (
+                                    <>
+                                        Assinar como: <strong className="font-bold">*{operatorName || authSession?.user?.name || "Operador"}*</strong>
+                                    </>
+                                ) : (
+                                    "Sem assinatura de operador"
+                                )}
+                            </span>
+                        </button>
 
-                    <div className="flex-1">
-                        {/* Reply preview bar */}
-                        {replyingTo && (
-                            <div className="mb-2 flex items-start gap-2 px-2 py-1.5 rounded-lg bg-muted/50 border-l-2 border-amber-500 text-xs animate-in slide-in-from-bottom-1 overflow-hidden">
-                                <div className="flex-1 min-w-0 overflow-hidden">
-                                    <span className="font-semibold text-amber-500 block text-[10px]">Replying to {replyingTo.fromMe ? "you" : (replyingTo.pushName || jid.split('@')[0])}</span>
-                                    <span className="text-muted-foreground truncate block w-full">{replyingTo.content || `[${replyingTo.type}]`}</span>
-                                </div>
-                                <button onClick={() => setReplyingTo(null)} className="p-0.5 text-muted-foreground hover:text-foreground shrink-0"><X className="h-3 w-3" /></button>
+                        {signOperator && !isEditingOperator && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setCustomOperatorInput(operatorName || authSession?.user?.name || "");
+                                    setIsEditingOperator(true);
+                                }}
+                                className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2 flex items-center gap-1 cursor-pointer"
+                                title="Editar nome do operador"
+                            >
+                                <Edit2 className="h-2.5 w-2.5" />
+                                Alterar nome
+                            </button>
+                        )}
+
+                        {isEditingOperator && (
+                            <div className="inline-flex items-center gap-1 bg-background px-2 py-0.5 rounded-md border shadow-sm">
+                                <input
+                                    type="text"
+                                    value={customOperatorInput}
+                                    onChange={(e) => setCustomOperatorInput(e.target.value)}
+                                    placeholder="Ex: Lucas Melo"
+                                    className="h-6 w-32 px-1.5 text-xs bg-muted/30 border rounded focus:outline-none"
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            const val = customOperatorInput.trim() || authSession?.user?.name || "Operador";
+                                            setOperatorName(val);
+                                            localStorage.setItem("wa_operator_name", val);
+                                            setIsEditingOperator(false);
+                                        } else if (e.key === "Escape") {
+                                            setIsEditingOperator(false);
+                                        }
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const val = customOperatorInput.trim() || authSession?.user?.name || "Operador";
+                                        setOperatorName(val);
+                                        localStorage.setItem("wa_operator_name", val);
+                                        setIsEditingOperator(false);
+                                    }}
+                                    className="text-[11px] text-primary hover:underline font-medium cursor-pointer"
+                                >
+                                    Salvar
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsEditingOperator(false)}
+                                    className="text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+                                >
+                                    Cancelar
+                                </button>
                             </div>
                         )}
-                        <div className="flex items-end gap-2 p-1 rounded-2xl border border-border/30 bg-background">
-                            <textarea ref={inputRef} value={input} onChange={(e) => { setInput(e.target.value); const el = e.target; el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 120) + "px"; }}
-                                onKeyDown={handleKeyDown} placeholder="Type a message..." rows={1} style={{ minHeight: "36px", maxHeight: "120px" }}
-                                className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground placeholder-muted-foreground focus:outline-none leading-normal" />
-                        </div>
                     </div>
-
-                    <Button onClick={handleSend} disabled={!input.trim()} size="icon" className="h-9 w-9 rounded-full shrink-0"><Send className="h-4 w-4" /></Button>
                 </div>
+
+                {/* Input area or Finalized Locked Bar */}
+                {isChatFinalized ? (
+                    <div className="max-w-3xl mx-auto py-3.5 px-4 rounded-2xl bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left animate-in fade-in slide-in-from-bottom-2 shadow-xs">
+                        <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                                <Lock className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <h4 className="text-sm font-semibold text-foreground flex items-center justify-center sm:justify-start gap-1.5">
+                                    Atendimento Finalizado
+                                </h4>
+                                <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                                    A digitação e o envio de mensagens estão bloqueados. Para responder a este contato, é necessário reabrir o atendimento.
+                                </p>
+                            </div>
+                        </div>
+                        <Button
+                            type="button"
+                            disabled={isFinishing}
+                            onClick={handleReopenAttendance}
+                            className="bg-amber-600 hover:bg-amber-700 text-white font-semibold gap-2 px-4 py-2 h-9 rounded-xl shadow-md cursor-pointer shrink-0 transition-transform active:scale-95"
+                        >
+                            {isFinishing ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" /> Reabrindo...
+                                </>
+                            ) : (
+                                <>
+                                    <RotateCcw className="h-4 w-4" /> Reabrir Atendimento
+                                </>
+                            )}
+                        </Button>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2 max-w-3xl mx-auto">
+                        <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+
+                        {!isRecording && (
+                            <>
+                                <Popover>
+                                    <PopoverTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full shrink-0 text-muted-foreground hover:text-foreground cursor-pointer" title="Anexar arquivo ou gravar áudio">
+                                            <Paperclip className="h-4.5 w-4.5" />
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-44 p-1.5" side="top" align="start">
+                                        <div className="flex flex-col gap-0.5">
+                                            <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs text-red-500 hover:text-red-600 hover:bg-red-500/10 cursor-pointer" onClick={startRecording}>
+                                                <Mic className="h-3.5 w-3.5" /> Gravar Áudio
+                                            </Button>
+                                            <div className="h-px bg-border/40 my-0.5" />
+                                            <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs cursor-pointer" onClick={() => triggerUpload('image')}>
+                                                <ImageIcon className="h-3.5 w-3.5 text-blue-500" /> Imagem
+                                            </Button>
+                                            <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs cursor-pointer" onClick={() => triggerUpload('video')}>
+                                                <Video className="h-3.5 w-3.5 text-purple-500" /> Vídeo
+                                            </Button>
+                                            <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs cursor-pointer" onClick={() => triggerUpload('audio')}>
+                                                <Music className="h-3.5 w-3.5 text-orange-500" /> Áudio (Arquivo)
+                                            </Button>
+                                            <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs cursor-pointer" onClick={() => triggerUpload('document')}>
+                                                <FileText className="h-3.5 w-3.5 text-emerald-500" /> Documento
+                                            </Button>
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
+
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => {
+                                        setShowQuickRepliesPopup(prev => !prev);
+                                        setQuickReplyFilter("");
+                                        setSelectedQuickReplyIndex(0);
+                                    }}
+                                    className={cn(
+                                        "h-9 w-9 rounded-full shrink-0 text-muted-foreground hover:text-amber-500 cursor-pointer transition-colors",
+                                        showQuickRepliesPopup && "text-amber-500 bg-amber-500/10"
+                                    )}
+                                    title="Respostas Rápidas (atalho /)"
+                                >
+                                    <Zap className="h-4.5 w-4.5" />
+                                </Button>
+                            </>
+                        )}
+
+                        {isRecording ? (
+                            <div className="flex-1 flex items-center justify-between gap-3 bg-red-500/10 dark:bg-red-500/15 border-2 border-red-500/40 rounded-2xl px-4 py-2 animate-in fade-in slide-in-from-bottom-2">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <span className="relative flex h-3 w-3 shrink-0">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
+                                    </span>
+                                    <span className="font-mono text-sm font-bold text-red-600 dark:text-red-400 shrink-0">
+                                        {formatDuration(recordingDuration)}
+                                    </span>
+                                    {/* Visual Sound wave pulse */}
+                                    <div className="hidden sm:flex items-center gap-1 ml-1.5 py-1">
+                                        <span className="w-1 h-2.5 bg-red-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                                        <span className="w-1 h-5 bg-red-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                                        <span className="w-1 h-3.5 bg-red-500 rounded-full animate-bounce [animation-delay:-0.4s]"></span>
+                                        <span className="w-1 h-6 bg-red-500 rounded-full animate-bounce [animation-delay:-0.2s]"></span>
+                                        <span className="w-1 h-4 bg-red-500 rounded-full animate-bounce [animation-delay:-0.35s]"></span>
+                                    </div>
+                                    <span className="text-xs text-muted-foreground hidden md:inline truncate">
+                                        Gravando mensagem de voz...
+                                    </span>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={cancelRecording}
+                                        disabled={isSendingAudio}
+                                        className="h-8 px-2.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-500/20 gap-1 rounded-xl cursor-pointer"
+                                        title="Descartar gravação"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                        <span className="hidden sm:inline">Descartar</span>
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={stopAndSendRecording}
+                                        disabled={isSendingAudio}
+                                        className="h-8 px-3.5 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 rounded-xl shadow-md font-semibold cursor-pointer"
+                                        title="Enviar mensagem de voz"
+                                    >
+                                        {isSendingAudio ? (
+                                            <>
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                <span>Enviando...</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Send className="h-3.5 w-3.5" />
+                                                <span>Enviar Áudio</span>
+                                            </>
+                                        )}
+                                    </Button>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex-1 relative">
+                                    {/* Quick Replies Floating Popup */}
+                                    {showQuickRepliesPopup && filteredQuickReplies.length > 0 && (
+                                        <div className="absolute bottom-full mb-2 left-0 right-0 max-h-64 overflow-y-auto rounded-xl border border-border/70 bg-popover/95 backdrop-blur-md shadow-2xl p-1.5 z-50 animate-in fade-in slide-in-from-bottom-2">
+                                            <div className="px-2 py-1 text-[11px] font-semibold text-muted-foreground flex items-center justify-between border-b border-border/30 mb-1">
+                                                <span className="flex items-center gap-1.5 text-foreground">
+                                                    <Zap className="h-3.5 w-3.5 text-amber-500" /> Respostas Rápidas ({filteredQuickReplies.length})
+                                                </span>
+                                                <span className="text-[10px] text-muted-foreground/80">
+                                                    Pressione <kbd className="px-1 py-0.5 bg-muted border rounded font-mono text-[9px]">Enter</kbd> para inserir
+                                                </span>
+                                            </div>
+                                            <div className="flex flex-col gap-0.5">
+                                                {filteredQuickReplies.map((reply, i) => (
+                                                    <button
+                                                        key={reply.id || i}
+                                                        type="button"
+                                                        onClick={() => applyQuickReply(reply)}
+                                                        className={cn(
+                                                            "w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer",
+                                                            i === selectedQuickReplyIndex
+                                                                ? "bg-primary text-primary-foreground font-medium shadow-xs"
+                                                                : "hover:bg-muted text-foreground"
+                                                        )}
+                                                    >
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <span className={cn(
+                                                                "font-mono font-bold text-[11px] px-1.5 py-0.5 rounded",
+                                                                i === selectedQuickReplyIndex
+                                                                    ? "bg-primary-foreground/20 text-primary-foreground"
+                                                                    : "bg-primary/10 text-primary border border-primary/20"
+                                                            )}>
+                                                                {reply.shortcut}
+                                                            </span>
+                                                            <span className="font-semibold truncate">{reply.title}</span>
+                                                        </div>
+                                                        <span className={cn(
+                                                            "text-[10px] truncate max-w-[220px] opacity-75",
+                                                            i === selectedQuickReplyIndex ? "text-primary-foreground" : "text-muted-foreground"
+                                                        )}>
+                                                            {reply.content}
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Reply preview bar */}
+                                    {replyingTo && (
+                                        <div className="mb-2 flex items-start gap-2 px-2 py-1.5 rounded-lg bg-muted/50 border-l-2 border-amber-500 text-xs animate-in slide-in-from-bottom-1 overflow-hidden">
+                                            <div className="flex-1 min-w-0 overflow-hidden">
+                                                <span className="font-semibold text-amber-500 block text-[10px]">Respondendo a {replyingTo.fromMe ? "você" : (replyingTo.pushName || jid.split('@')[0])}</span>
+                                                <span className="text-muted-foreground truncate block w-full">{replyingTo.content || `[${replyingTo.type}]`}</span>
+                                            </div>
+                                            <button onClick={() => setReplyingTo(null)} className="p-0.5 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"><X className="h-3 w-3" /></button>
+                                        </div>
+                                    )}
+                                    <div className="flex items-end gap-1 p-1 rounded-2xl border border-border/30 bg-background shadow-sm">
+                                        <EmojiPicker onSelectEmoji={handleInsertEmoji} />
+                                        <textarea ref={inputRef} value={input} onChange={handleInputChange}
+                                            onKeyDown={handleKeyDown} placeholder="Digite uma mensagem ou / para respostas rápidas..." rows={1} style={{ minHeight: "36px", maxHeight: "120px" }}
+                                            className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground placeholder-muted-foreground focus:outline-none leading-normal" />
+                                    </div>
+                                </div>
+
+                                {input.trim() ? (
+                                    <Button
+                                        onClick={handleSend}
+                                        size="icon"
+                                        className="h-9 w-9 rounded-full shrink-0 bg-blue-600 hover:bg-blue-700 text-white shadow-md cursor-pointer transition-all"
+                                        title="Enviar mensagem"
+                                    >
+                                        <Send className="h-4 w-4" />
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        type="button"
+                                        onClick={startRecording}
+                                        size="icon"
+                                        className="h-9 w-9 rounded-full shrink-0 bg-blue-600 hover:bg-blue-700 text-white shadow-md cursor-pointer transition-all hover:scale-105"
+                                        title="Gravar áudio (Mensagem de Voz)"
+                                    >
+                                        <Mic className="h-4.5 w-4.5" />
+                                    </Button>
+                                )}
+                            </>
+                        )}
+                    </div>
+                )}
             </div>
+            </>
+            )}
         </div>
     );
 }

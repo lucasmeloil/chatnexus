@@ -165,11 +165,16 @@ export default function SessionDetailPage() {
 
     const handlePairingRequest = async () => {
         if (!phoneNumber) {
-            toast.error("Please enter a phone number");
+            toast.error("Por favor insira um número de telefone");
             return;
         }
         setIsPairing(true);
-        await performAction('pair', { phoneNumber });
+        let cleaned = phoneNumber.replace(/\D/g, "");
+        if (cleaned.startsWith("0")) cleaned = cleaned.replace(/^0+/, "");
+        if (cleaned.length === 10 || cleaned.length === 11) {
+            cleaned = `55${cleaned}`;
+        }
+        await performAction('pair', { phoneNumber: cleaned });
         setIsPairing(false);
     };
 
@@ -275,23 +280,22 @@ export default function SessionDetailPage() {
                             <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-lg bg-white relative group">
                                 <QRCodeSVG value={qrCode} size={256} />
                                 <p className="mt-4 text-sm text-gray-500 animate-pulse">Scan with WhatsApp to connect</p>
-
-                                <div className="mt-6 pt-6 border-t w-full">
+                                <div className="mt-6 pt-6 border-t w-full">
                                     <div className="flex flex-col items-center gap-3">
-                                        <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Or link with phone number</div>
+                                        <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Ou vincular via número de telefone</div>
                                         <div className="flex flex-col w-full max-w-sm gap-2 mt-1">
                                             <div className="flex gap-2">
                                                 <Input
-                                                    placeholder="628123456789"
+                                                    placeholder="(11) 98765-4321 ou 5511..."
                                                     value={phoneNumber}
                                                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPhoneNumber(e.target.value)}
                                                     className="font-mono"
                                                 />
                                                 <Button onClick={handlePairingRequest} disabled={isPairing || !phoneNumber}>
-                                                    Link
+                                                    Vincular
                                                 </Button>
                                             </div>
-                                            <p className="text-[10px] text-muted-foreground text-center">Use country code without + or spaces (e.g., 628123456789)</p>
+                                            <p className="text-[10px] text-muted-foreground text-center">Informe com DDD. O código +55 (Brasil) é adicionado automaticamente.</p>
                                         </div>
                                         {pairingCode && (
                                             <div className="mt-4 p-4 bg-slate-900 rounded-lg w-full max-w-[320px] text-center border-2 border-slate-700 shadow-xl relative group/code">

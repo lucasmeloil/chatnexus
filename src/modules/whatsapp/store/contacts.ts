@@ -10,15 +10,27 @@ export function bindContactSync(sock: WASocket, sessionId: string) {
     // First, get the database Session ID (cuid)
     let dbSessionId: string | null = null;
     
+    const getDbSessionId = async (): Promise<string | null> => {
+        if (dbSessionId) return dbSessionId;
+        try {
+            const session = await prisma.session.findUnique({
+                where: { sessionId },
+                select: { id: true }
+            });
+            if (session) {
+                dbSessionId = session.id;
+            }
+        } catch (e) {
+            logger.error("Store", `Failed to get dbSessionId for contacts in ${sessionId}`, e);
+        }
+        return dbSessionId;
+    };
+
     // Initialize by fetching the session ID
     (async () => {
-        const session = await prisma.session.findUnique({
-            where: { sessionId },
-            select: { id: true }
-        });
-        if (session) {
-            dbSessionId = session.id;
-            logger.info("Store", `Contact sync initialized for session ${sessionId} (db: ${dbSessionId})`);
+        const id = await getDbSessionId();
+        if (id) {
+            logger.info("Store", `Contact sync initialized for session ${sessionId} (db: ${id})`);
         } else {
             logger.error("Store", `Session ${sessionId} not found for contact sync`);
         }
@@ -26,11 +38,8 @@ export function bindContactSync(sock: WASocket, sessionId: string) {
 
     // Handle contacts.update event (fires when contacts are updated)
     sock.ev.on('contacts.update', async (updates) => {
-        if (!dbSessionId) {
-            const session = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
-            if (!session) return;
-            dbSessionId = session.id;
-        }
+        const currentDbSessionId = await getDbSessionId();
+        if (!currentDbSessionId) return;
         
         logger.debug("Store", `Received ${updates.length} contact updates for session ${sessionId}`);
         for (const update of updates) {
@@ -38,9 +47,9 @@ export function bindContactSync(sock: WASocket, sessionId: string) {
                 if (!update.id) continue;
                 
                 await prisma.contact.upsert({
-                    where: { sessionId_jid: { sessionId: dbSessionId, jid: update.id } },
+                    where: { sessionId_jid: { sessionId: currentDbSessionId, jid: update.id } },
                     create: {
-                        sessionId: dbSessionId,
+                        sessionId: currentDbSessionId,
                         jid: update.id,
                         name: update.name || update.notify,
                         notify: update.notify,
@@ -60,11 +69,8 @@ export function bindContactSync(sock: WASocket, sessionId: string) {
 
     // Also listen for messaging events to auto-create contacts
     sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, isLatest }) => {
-        if (!dbSessionId) {
-            const session = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
-            if (!session) return;
-            dbSessionId = session.id;
-        }
+        const currentDbSessionId = await getDbSessionId();
+        if (!currentDbSessionId) return;
         
         logger.info("Store", `Received messaging history: ${chats.length} chats, ${contacts?.length || 0} contacts, ${messages.length} messages`);
         
@@ -74,9 +80,9 @@ export function bindContactSync(sock: WASocket, sessionId: string) {
                 if (!chat.id || chat.id.includes('@g.us') || chat.id.includes('@broadcast')) continue;
                 
                 await prisma.contact.upsert({
-                    where: { sessionId_jid: { sessionId: dbSessionId, jid: chat.id } },
+                    where: { sessionId_jid: { sessionId: currentDbSessionId, jid: chat.id } },
                     create: {
-                        sessionId: dbSessionId,
+                        sessionId: currentDbSessionId,
                         jid: chat.id,
                         name: chat.name || undefined,
                         notify: (chat as any).notify || undefined
@@ -97,9 +103,9 @@ export function bindContactSync(sock: WASocket, sessionId: string) {
                     if (!contact.id) continue;
                     
                     await prisma.contact.upsert({
-                        where: { sessionId_jid: { sessionId: dbSessionId, jid: contact.id } },
+                        where: { sessionId_jid: { sessionId: currentDbSessionId, jid: contact.id } },
                         create: {
-                            sessionId: dbSessionId,
+                            sessionId: currentDbSessionId,
                             jid: contact.id,
                             name: contact.name || contact.notify,
                             notify: contact.notify

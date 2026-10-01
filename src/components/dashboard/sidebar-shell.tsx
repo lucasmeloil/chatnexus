@@ -3,7 +3,7 @@
 import { SidebarNav } from "./sidebar-nav";
 import { useSidebar } from "./sidebar-context";
 import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
+import { LogOut, PanelLeftClose, PanelLeft } from "lucide-react";
 import { signOut } from "next-auth/react";
 
 interface SidebarShellProps {
@@ -14,7 +14,7 @@ interface SidebarShellProps {
 }
 
 export function SidebarShell({ appName, userName, userEmail, version }: SidebarShellProps) {
-    const { isCollapsed } = useSidebar();
+    const { isCollapsed, toggleCollapse } = useSidebar();
 
     return (
         <aside
@@ -26,21 +26,40 @@ export function SidebarShell({ appName, userName, userEmail, version }: SidebarS
                 ${isCollapsed ? "w-[72px]" : "w-[260px]"}
             `}
         >
-            {/* Logo / Brand */}
-            <div className={`border-b border-border/30 transition-all duration-300 ${isCollapsed ? "px-3 py-4" : "px-5 py-5"}`}>
+            {/* Logo / Brand Header */}
+            <div className={`border-b border-border/30 transition-all duration-300 ${isCollapsed ? "px-2 py-3" : "px-3 py-3"}`}>
                 {isCollapsed ? (
-                    <div className="flex justify-center">
-                        <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-primary to-blue-500 flex items-center justify-center text-white font-bold text-sm shadow-md">
-                            {appName.charAt(0)}
-                        </div>
+                    <div className="flex flex-col items-center gap-1.5">
+                        <button
+                            onClick={toggleCollapse}
+                            title="Clique para expandir o menu"
+                            className="group relative flex items-center justify-center p-1.5 rounded-xl hover:bg-primary/10 transition-all focus:outline-none"
+                        >
+                            <img 
+                                src="/nexus-icon.png" 
+                                alt="NEXUS CHAT" 
+                                className="h-8 w-auto object-contain drop-shadow transition-transform group-hover:scale-110" 
+                            />
+                        </button>
                     </div>
                 ) : (
-                    <>
-                        <h1 className="text-xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-blue-500">
-                            {appName}
-                        </h1>
-                        <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">WhatsApp Gateway</p>
-                    </>
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center min-w-0">
+                            <img 
+                                src="/nexus-logo.png" 
+                                alt="NEXUS CHAT" 
+                                className="h-8 w-auto max-w-[170px] object-contain drop-shadow-sm" 
+                            />
+                        </div>
+                        <button
+                            onClick={toggleCollapse}
+                            title="Recolher menu lateral"
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all flex items-center justify-center flex-shrink-0"
+                            aria-label="Recolher menu lateral"
+                        >
+                            <PanelLeftClose size={18} />
+                        </button>
+                    </div>
                 )}
             </div>
 
@@ -84,7 +103,7 @@ export function SidebarShell({ appName, userName, userEmail, version }: SidebarS
                             className="w-full flex items-center justify-center gap-2 text-xs h-8 rounded-lg border-border/40 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-colors"
                             onClick={() => signOut({ callbackUrl: "/auth/login" })}
                         >
-                            <LogOut size={14} /> Sign Out
+                            <LogOut size={14} /> Sair
                         </Button>
                         <p className="text-[9px] text-muted-foreground/50 text-center mt-2 font-mono">v{version}</p>
                     </>

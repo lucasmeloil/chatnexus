@@ -28,16 +28,15 @@ export const viewport: Viewport = {
 };
 
 export async function generateMetadata(): Promise<Metadata> {
-  let appName = "WA-AKG";
+  let appName = process.env.APP_NAME || "NEXUS CHAT";
   try {
-    // @ts-ignore
     const config = await prisma.systemConfig.findUnique({ where: { id: "default" } });
     if (config?.appName) appName = config.appName;
   } catch (e) {
     console.error("Failed to fetch system config for metadata:", e);
   }
 
-  const appDefaultTitle = `${appName} | Premium WhatsApp Gateway`;
+  const appDefaultTitle = `${appName} | Gateway de WhatsApp`;
 
   return {
     metadataBase: new URL(APP_URL),
@@ -71,7 +70,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     openGraph: {
       type: "website",
-      locale: "en_US",
+      locale: "pt_BR",
       siteName: appName,
       title: appDefaultTitle,
       description: APP_DESCRIPTION,
@@ -99,8 +98,9 @@ export default function RootLayout({
   const allowIndexing = process.env.NEXT_PUBLIC_ALLOW_INDEXING === "true";
 
   return (
-    <html lang="en" suppressHydrationWarning className="scroll-smooth">
+    <html lang="pt-BR" suppressHydrationWarning className="scroll-smooth notranslate" translate="no">
       <head>
+        <meta name="google" content="notranslate" />
         {/* Conditional robots meta (noindex for staging/dev) */}
         {!allowIndexing && <meta name="robots" content="noindex, nofollow" />}
         {/* DNS prefetch for performance */}

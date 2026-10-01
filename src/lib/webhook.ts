@@ -381,7 +381,6 @@ export async function downloadAndSaveMedia(message: WAMessage, sessionId: string
         const messageType = Object.keys(messageContent)[0];
 
         if (!['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'].includes(messageType)) {
-            logger.debug("Media", `Message type ${messageType} is not a downloadable media.`);
             return null;
         }
 
@@ -406,14 +405,14 @@ export async function downloadAndSaveMedia(message: WAMessage, sessionId: string
                 });
 
                 if (!res.ok) {
-                    logger.error("Media", `Newsletter media HTTP ${res.status} ${res.statusText} for URL: ${downloadUrl}`);
+                    logger.warn("Media", `Newsletter media HTTP ${res.status} ${res.statusText} for URL: ${downloadUrl}`);
                     return null;
                 }
 
                 buffer = Buffer.from(await res.arrayBuffer());
                 logger.success("Media", `Newsletter media downloaded: ${buffer.length} bytes`);
-            } catch (e) {
-                logger.error("Media", "Failed to download newsletter media:", e);
+            } catch (e: any) {
+                logger.warn("Media", `Failed to download newsletter media: ${e?.message || e}`);
                 return null;
             }
         } else {
@@ -424,8 +423,8 @@ export async function downloadAndSaveMedia(message: WAMessage, sessionId: string
                     "buffer",
                     {}
                 ) as Buffer;
-            } catch (e) {
-                logger.error("Media", "Failed to download encrypted media:", e);
+            } catch (e: any) {
+                logger.warn("Media", `Failed to download encrypted media (${messageType}): ${e?.message || e}`);
                 return null;
             }
         }
@@ -544,15 +543,8 @@ export async function onMessageReceived(sessionId: string, message: any, existin
         }
     }
 
-    // Download media if available (or use existing)
-    let fileUrl: string | null = existingFileUrl || null;
-    if (!fileUrl) {
-        try {
-            fileUrl = await downloadAndSaveMedia(message, sessionId);
-        } catch (e) {
-            logger.error("Media", "Error handling media download", e);
-        }
-    }
+    // Use existing fileUrl if already processed by store
+    const fileUrl: string | null = existingFileUrl || null;
 
     const normalized = extractMessageContent(message);
     const quoted = await extractQuotedMessageAsync(message, sessionId);
@@ -594,13 +586,8 @@ export async function onMessageSent(sessionId: string, message: any, existingFil
     const isGroup = remoteJid.endsWith("@g.us");
     const remoteJidAlt = message.key?.remoteJidAlt || null;
 
-    // Download media for sent messages too
-    let fileUrl: string | null = existingFileUrl || null;
-    if (!fileUrl) {
-        try {
-            fileUrl = await downloadAndSaveMedia(message, sessionId);
-        } catch (e) { /* ignore */ }
-    }
+    // Use existing fileUrl if available
+    const fileUrl: string | null = existingFileUrl || null;
 
     // --- Consistent JID Normalization (same as onMessageReceived) ---
     const normalizedFrom = await resolveToPhoneJid(remoteJid, sessionId, remoteJidAlt);

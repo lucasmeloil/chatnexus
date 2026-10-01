@@ -19,6 +19,7 @@ import {
 import { RefreshCw, Save, AlertCircle, Bot, X, Plus, ShieldCheck, Zap, UserCheck, MessageSquarePlus } from "lucide-react";
 import { toast } from "sonner";
 import { SessionGuard } from "@/components/dashboard/session-guard";
+import { formatToBrazilPhoneJid } from "@/lib/jid-utils";
 
 export default function BotSettingsPage() {
     const { sessionId } = useSessionProvider();
@@ -152,8 +153,7 @@ export default function BotSettingsPage() {
 
     const addJid = (listName: 'botAllowedJids' | 'botBlockedJids' | 'autoReplyAllowedJids' | 'autoReplyBlockedJids') => {
         if (!newJid || !newJid.trim()) return;
-        let formatted = newJid.trim();
-        if (!formatted.includes('@')) formatted += '@s.whatsapp.net';
+        const formatted = formatToBrazilPhoneJid(newJid);
 
         if (!botConfig[listName].includes(formatted)) {
             setBotConfig(prev => ({
@@ -241,7 +241,7 @@ export default function BotSettingsPage() {
                                     </Label>
                                     <div className="flex gap-2">
                                         <Input
-                                            placeholder="628123456789@s.whatsapp.net"
+                                            placeholder="Ex: (11) 98765-4321 ou 5511987654321"
                                             value={newJid}
                                             onChange={(e) => setNewJid(e.target.value)}
                                             onKeyDown={(e) => e.key === 'Enter' && addJid(botConfig.botMode === 'SPECIFIC' ? 'botAllowedJids' : 'botBlockedJids')}

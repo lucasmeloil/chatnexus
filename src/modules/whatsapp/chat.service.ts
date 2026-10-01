@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/prisma";
-import { normalizeJid } from "@/lib/jid-utils";
+import { normalizeJid, isSameChatJid, formatToBrazilPhoneJid } from "@/lib/jid-utils";
 import { waManager } from "@/modules/whatsapp/manager";
 import { onMessageSent } from "@/lib/webhook";
+import { AttendanceService } from "./attendance.service";
 import Sticker from "wa-sticker-formatter";
+import { convertToOggOpus } from "@/lib/audio-converter";
 
 export class ChatService {
     /**
@@ -34,10 +36,10 @@ export class ChatService {
             INNER JOIN (
                 SELECT remoteJid, MAX(timestamp) as max_ts
                 FROM \`Message\`
-                WHERE sessionId = ?
+                WHERE sessionId = ? AND remoteJid NOT LIKE '%status@broadcast%' AND remoteJid NOT LIKE '%@newsletter%'
                 GROUP BY remoteJid
             ) m2 ON m1.remoteJid = m2.remoteJid AND m1.timestamp = m2.max_ts
-            WHERE m1.sessionId = ?
+            WHERE m1.sessionId = ? AND m1.remoteJid NOT LIKE '%status@broadcast%' AND m1.remoteJid NOT LIKE '%@newsletter%'
             ${before ? 'AND m1.timestamp < ?' : ''}
             ORDER BY m1.timestamp DESC
             LIMIT ?
@@ -46,8 +48,34 @@ export class ChatService {
         // Fast return if no messages
         if (rawLastMessages.length === 0) return [];
 
-        // 2. Batch fetch contacts & groups ONLY for JIDs that have messages
-        const jids = rawLastMessages.map(m => m.remoteJid);
+        // 2. Batch fetch contacts, groups & unread message counts ONLY for JIDs that have messages
+        const jids = Array.from(new Set(rawLastMessages.map(m => m.remoteJid)));
+        const inPlaceholders = jids.map(() => '?').join(',');
+
+        let unreadCounts: Array<{ remoteJid: string; unreadCount: bigint | number }> = [];
+        try {
+            unreadCounts = await prisma.$queryRawUnsafe<Array<{ remoteJid: string; unreadCount: bigint | number }>>(`
+                SELECT 
+                    m.remoteJid,
+                    COUNT(*) as unreadCount
+                FROM \`Message\` m
+                LEFT JOIN (
+                    SELECT remoteJid, MAX(timestamp) as lastOutTs
+                    FROM \`Message\`
+                    WHERE sessionId = ? AND fromMe = 1 AND remoteJid IN (${inPlaceholders})
+                    GROUP BY remoteJid
+                ) out_m ON m.remoteJid = out_m.remoteJid
+                WHERE m.sessionId = ? 
+                  AND m.fromMe = 0 
+                  AND m.status != 'READ'
+                  AND m.remoteJid IN (${inPlaceholders})
+                  AND (out_m.lastOutTs IS NULL OR m.timestamp > out_m.lastOutTs)
+                GROUP BY m.remoteJid
+            `, dbSessionId, ...jids, dbSessionId, ...jids);
+        } catch (e) {
+            console.error("Error querying unreadCounts in getChatsList:", e);
+        }
+
         const [contacts, groups] = await Promise.all([
             prisma.contact.findMany({
                 where: { sessionId: dbSessionId, jid: { in: jids } },
@@ -64,19 +92,45 @@ export class ChatService {
         contacts.forEach(c => infoMap.set(c.jid, { name: c.name, notify: c.notify, profilePic: c.profilePic }));
         groups.forEach(g => infoMap.set(g.jid, { name: g.subject, notify: g.subject, profilePic: null }));
 
+        const unreadMap = new Map<string, number>();
+        unreadCounts.forEach(u => unreadMap.set(u.remoteJid, Number(u.unreadCount || 0)));
+
         // 3. Build result array (already sorted by SQL DESC)
         const result: any[] = [];
-        const seenJids = new Set<string>();
         for (const msg of rawLastMessages) {
-            if (seenJids.has(msg.remoteJid)) continue;
-            seenJids.add(msg.remoteJid);
+            // Check if this chat (or a variation of the same number with 12 vs 13 digits) was already added
+            const existingIdx = result.findIndex(r => isSameChatJid(r.jid, msg.remoteJid));
+            if (existingIdx !== -1) {
+                // If this variation has unread messages, sum them up
+                const existing = result[existingIdx];
+                const altUnread = unreadMap.get(msg.remoteJid) || 0;
+                if (altUnread > 0) {
+                    existing.unreadCount = (existing.unreadCount || 0) + altUnread;
+                }
+                // If the current entry has a newer message, update preview
+                const msgTs = new Date(msg.timestamp).getTime();
+                const existingTs = existing.lastMessage?.timestamp ? new Date(existing.lastMessage.timestamp).getTime() : 0;
+                if (msgTs > existingTs) {
+                    result[existingIdx] = {
+                        ...existing,
+                        lastMessage: {
+                            content: msg.content,
+                            timestamp: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : String(msg.timestamp),
+                            type: msg.type
+                        }
+                    };
+                }
+                continue;
+            }
 
-            const info = infoMap.get(msg.remoteJid);
+            const canonicalJid = formatToBrazilPhoneJid(msg.remoteJid);
+            const info = infoMap.get(msg.remoteJid) || infoMap.get(canonicalJid);
             result.push({
-                jid: msg.remoteJid,
+                jid: canonicalJid || msg.remoteJid,
                 name: info?.name || null,
                 notify: info?.notify || null,
                 profilePic: info?.profilePic || null,
+                unreadCount: unreadMap.get(msg.remoteJid) || 0,
                 lastMessage: {
                     content: msg.content,
                     timestamp: msg.timestamp instanceof Date
@@ -113,16 +167,22 @@ export class ChatService {
     ) {
         const normalizedJid = normalizeJid(jid);
 
-        // Find contact variations (LID, alt JIDs)
+        // Find contact variations (LID, alt JIDs, Brazilian 12/13 digits)
+        const candidates = AttendanceService.getJidCandidates(jid);
         const contact = await prisma.contact.findFirst({
             where: {
                 sessionId: dbSessionId,
-                OR: [{ jid }, { lid: jid }, { remoteJidAlt: jid }, { jid: normalizedJid }]
+                OR: [
+                    { jid: { in: candidates } },
+                    { lid: jid },
+                    { remoteJidAlt: { in: candidates } },
+                    { jid: normalizedJid }
+                ]
             },
             select: { jid: true, lid: true, remoteJidAlt: true }
         });
 
-        const queryJids = new Set([jid, normalizedJid]);
+        const queryJids = new Set([jid, normalizedJid, ...candidates]);
         if (contact) {
             if (contact.jid) queryJids.add(contact.jid);
             if (contact.lid) queryJids.add(contact.lid);
@@ -191,11 +251,68 @@ export class ChatService {
         };
     }
 
+    /**
+     * Resolve the canonical WhatsApp JID for sending.
+     * Ensures Brazilian phone numbers (12 vs 13 digits) are sent to the exact
+     * JID that actually exists and is registered on WhatsApp servers.
+     */
+    static async resolveSendingJid(sock: any, rawJid: string): Promise<string> {
+        let jid = (rawJid || "").trim();
+        if (jid.endsWith("@c.us")) {
+            jid = jid.replace("@c.us", "@s.whatsapp.net");
+        }
+
+        // Preserve groups, newsletters, broadcasts, and LIDs
+        if (jid.endsWith("@g.us") || jid.endsWith("@newsletter") || jid.endsWith("@broadcast") || jid.endsWith("@lid")) {
+            return jid;
+        }
+
+        const digits = jid.replace(/@.*$/, "").replace(/\D/g, "");
+        if (!digits) return jid;
+
+        if (sock && typeof sock.onWhatsApp === "function") {
+            try {
+                // 1. Check exact digits
+                const [check1] = await sock.onWhatsApp(digits);
+                if (check1?.exists && check1.jid) {
+                    return check1.jid;
+                }
+
+                // 2. If Brazilian number starting with 55
+                if (digits.startsWith("55")) {
+                    let altDigits: string | null = null;
+                    if (digits.length === 12) {
+                        // 12 digits: try with 9
+                        altDigits = `${digits.slice(0, 4)}9${digits.slice(4)}`;
+                    } else if (digits.length === 13 && digits[4] === "9") {
+                        // 13 digits: try without 9
+                        altDigits = `${digits.slice(0, 4)}${digits.slice(5)}`;
+                    }
+
+                    if (altDigits) {
+                        const [check2] = await sock.onWhatsApp(altDigits);
+                        if (check2?.exists && check2.jid) {
+                            return check2.jid;
+                        }
+                    }
+                }
+            } catch (err) {
+                // Ignore onWhatsApp error and fallback
+            }
+        }
+
+        if (jid.endsWith("@s.whatsapp.net")) {
+            return jid;
+        }
+        return formatToBrazilPhoneJid(jid) || `${digits}@s.whatsapp.net`;
+    }
+
     static async sendTextMessage(sessionId: string, jid: string, messagePayload: any, mentions?: string[], quotedMessageId?: string) {
         const instance = waManager.getInstance(sessionId);
         if (!instance || !instance.socket) {
             throw new Error("WhatsApp session is disconnected or not found");
         }
+        const targetJid = await ChatService.resolveSendingJid(instance.socket, jid);
 
         // Handle quoted/reply message
         let quotedOption: any = undefined;
@@ -318,7 +435,7 @@ export class ChatService {
             options.quoted = quotedOption;
         }
 
-        const sendResult = await instance.socket.sendMessage(jid, msgPayload, options);
+        const sendResult = await instance.socket.sendMessage(targetJid, msgPayload, options);
 
         // Fire webhook for sent message (non-blocking)
         try {
@@ -358,6 +475,46 @@ export class ChatService {
             // Non-blocking — webhook failure shouldn't break message send
         }
 
+        // Instant DB persistence and UI socket broadcast
+        if (sendResult?.key?.id) {
+            try {
+                const dbSession = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
+                if (dbSession) {
+                    const saved = await prisma.message.upsert({
+                        where: {
+                            sessionId_keyId: {
+                                sessionId: dbSession.id,
+                                keyId: sendResult.key.id
+                            }
+                        },
+                        create: {
+                            sessionId: dbSession.id,
+                            remoteJid: targetJid,
+                            fromMe: true,
+                            keyId: sendResult.key.id,
+                            type: (msgPayload.image ? "IMAGE" : msgPayload.video ? "VIDEO" : msgPayload.audio ? "AUDIO" : msgPayload.document ? "DOCUMENT" : msgPayload.sticker ? "STICKER" : "TEXT") as any,
+                            content: typeof msgPayload.text === 'string' ? msgPayload.text : (msgPayload.caption || ""),
+                            status: "SENT",
+                            timestamp: new Date()
+                        },
+                        update: {
+                            status: "SENT"
+                        }
+                    });
+
+                    const globalIo = (global as any).io || instance.io;
+                    if (globalIo) {
+                        globalIo.to(sessionId).emit("message.update", [{
+                            ...saved,
+                            timestamp: saved.timestamp.toISOString()
+                        }]);
+                    }
+                }
+            } catch (err) {
+                // Non-blocking
+            }
+        }
+
         return sendResult;
     }
 
@@ -377,21 +534,27 @@ export class ChatService {
         if (!instance || !instance.socket) {
             throw new Error("WhatsApp session is disconnected or not found");
         }
+        const targetJid = await ChatService.resolveSendingJid(instance.socket, jid);
 
         const messageOptions: any = {};
         if (caption) messageOptions.caption = caption;
         messageOptions.mimetype = mimetype;
 
         let content: any = {};
+        let finalBuffer = buffer;
+        let finalMime = mimetype;
 
         if (type === 'image') {
             content = { image: buffer, ...messageOptions };
         } else if (type === 'video') {
             content = { video: buffer, ...messageOptions };
         } else if (type === 'audio') {
-            content = { audio: buffer, mimetype: 'audio/mp4', ptt: false };
+            content = { audio: buffer, mimetype: mimetype || 'audio/mp4', ptt: false };
         } else if (type === 'voice') {
-            content = { audio: buffer, mimetype: 'audio/mp4', ptt: true };
+            // Transcode voice note (WebM/WAV/MP3) to WhatsApp native Ogg Opus (PTT)
+            finalBuffer = await convertToOggOpus(buffer);
+            finalMime = 'audio/ogg; codecs=opus';
+            content = { audio: finalBuffer, mimetype: finalMime, ptt: true };
         } else if (type === 'document') {
             content = { document: buffer, mimetype, fileName, ...messageOptions };
         } else if (type === 'sticker') {
@@ -406,7 +569,7 @@ export class ChatService {
             content = { document: buffer, mimetype, fileName, ...messageOptions };
         }
 
-        const sendResult = await instance.socket.sendMessage(jid, content);
+        const sendResult = await instance.socket.sendMessage(targetJid, content);
 
         // Fire webhook for sent media message (non-blocking)
         try {
@@ -424,7 +587,7 @@ export class ChatService {
             } else if (type === 'video') {
                 webhookMsg.message = { videoMessage: { caption: caption || "", mimetype } };
             } else if (type === 'audio' || type === 'voice') {
-                webhookMsg.message = { audioMessage: { mimetype: 'audio/mp4', ptt: type === 'voice' } };
+                webhookMsg.message = { audioMessage: { mimetype: finalMime, ptt: type === 'voice' } };
             } else if (type === 'document') {
                 webhookMsg.message = { documentMessage: { caption: caption || "", fileName, mimetype } };
             } else if (type === 'sticker') {
@@ -434,6 +597,46 @@ export class ChatService {
             onMessageSent(sessionId, webhookMsg).catch(e => console.error("Webhook error:", e));
         } catch (e) {
             // Non-blocking
+        }
+
+        // Instant DB persistence and UI socket broadcast for media
+        if (sendResult?.key?.id) {
+            try {
+                const dbSession = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
+                if (dbSession) {
+                    const saved = await prisma.message.upsert({
+                        where: {
+                            sessionId_keyId: {
+                                sessionId: dbSession.id,
+                                keyId: sendResult.key.id
+                            }
+                        },
+                        create: {
+                            sessionId: dbSession.id,
+                            remoteJid: targetJid,
+                            fromMe: true,
+                            keyId: sendResult.key.id,
+                            type: (type === 'voice' ? 'AUDIO' : type.toUpperCase()) as any,
+                            content: caption || fileName || "",
+                            status: "SENT",
+                            timestamp: new Date()
+                        },
+                        update: {
+                            status: "SENT"
+                        }
+                    });
+
+                    const globalIo = (global as any).io || instance.io;
+                    if (globalIo) {
+                        globalIo.to(sessionId).emit("message.update", [{
+                            ...saved,
+                            timestamp: saved.timestamp.toISOString()
+                        }]);
+                    }
+                }
+            } catch (err) {
+                // Non-blocking
+            }
         }
 
         return sendResult;

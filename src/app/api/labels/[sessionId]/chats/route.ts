@@ -25,9 +25,22 @@ export async function GET(
 
         // Mode: Get labels assigned to a specific chat JID
         if (jid) {
+            const decodedJid = decodeURIComponent(jid);
+            const targetJids = [decodedJid];
+
+            // Handle Brazilian 9th digit variation
+            const digits = decodedJid.replace(/@.*$/, "").replace(/\D/g, "");
+            if (digits.startsWith("55")) {
+                if (digits.length === 13 && digits[4] === "9") {
+                    targetJids.push(`${digits.slice(0, 4)}${digits.slice(5)}@s.whatsapp.net`);
+                } else if (digits.length === 12) {
+                    targetJids.push(`${digits.slice(0, 4)}9${digits.slice(4)}@s.whatsapp.net`);
+                }
+            }
+
             const chatLabels = await prisma.chatLabel.findMany({
                 where: {
-                    chatJid: decodeURIComponent(jid),
+                    chatJid: { in: targetJids },
                     label: { sessionId }
                 },
                 include: {

@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Trash2, Plus, CalendarClock, RefreshCw, Pencil, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import moment from "moment-timezone";
+import { formatToBrazilPhoneJid } from "@/lib/jid-utils";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -53,7 +54,7 @@ export default function SchedulerPage() {
     const [messages, setMessages] = useState<ScheduledMessage[]>([]);
     const [loading, setLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
-    const [systemTimezone, setSystemTimezone] = useState("Asia/Jakarta");
+    const [systemTimezone, setSystemTimezone] = useState("America/Sao_Paulo");
     const [activeTab, setActiveTab] = useState("pending");
 
     // Form state
@@ -234,7 +235,7 @@ export default function SchedulerPage() {
         if (!jid.includes("@")) {
             if (newJidType === "group") jid += "@g.us";
             else if (newJidType === "newsletter") jid += "@newsletter";
-            else jid += "@s.whatsapp.net";
+            else jid = formatToBrazilPhoneJid(jid);
         }
 
         const cronData = buildCronData(isRecurring, recurrenceType, recurringMinutes, recurringHours, recurringDays, customCron, finalSendAt);
@@ -300,7 +301,7 @@ export default function SchedulerPage() {
         if (!jid.includes("@")) {
             if (editJidType === "group") jid += "@g.us";
             else if (editJidType === "newsletter") jid += "@newsletter";
-            else jid += "@s.whatsapp.net";
+            else jid = formatToBrazilPhoneJid(jid);
         }
 
         const cronData = buildCronData(editIsRecurring, editRecurrenceType, editRecurringMinutes, editRecurringHours, editRecurringDays, editCustomCron, finalSendAt);
@@ -512,7 +513,7 @@ export default function SchedulerPage() {
                                         </div>
                                     </RadioGroup>
                                 </div>
-                                <Input value={newJid} onChange={e => setNewJid(e.target.value)} placeholder={newJidType === 'group' ? "120363... (Group ID)" : newJidType === 'newsletter' ? "120363... (Channel ID)" : "62812345678"} />
+                                <Input value={newJid} onChange={e => setNewJid(e.target.value)} placeholder={newJidType === 'group' ? "120363... (Group ID)" : newJidType === 'newsletter' ? "120363... (Channel ID)" : "11987654321 ou 5511987654321"} />
                             </div>
                             
                             {renderRecurrenceForm(
@@ -652,7 +653,7 @@ export default function SchedulerPage() {
                                         </div>
                                     </RadioGroup>
                                 </div>
-                                <Input value={editJid} onChange={e => setEditJid(e.target.value)} placeholder={editJidType === 'group' ? "120363... (Group ID)" : editJidType === 'newsletter' ? "120363... (Channel ID)" : "62812345678"} />
+                                <Input value={editJid} onChange={e => setEditJid(e.target.value)} placeholder={editJidType === 'group' ? "120363... (Group ID)" : editJidType === 'newsletter' ? "120363... (Channel ID)" : "11987654321 ou 5511987654321"} />
                             </div>
                             
                             {renderRecurrenceForm(

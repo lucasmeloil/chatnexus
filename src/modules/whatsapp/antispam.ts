@@ -82,76 +82,95 @@ class AntiSpamManager {
         if (this.processing.get(sessionId)) return; // Already processing
         this.processing.set(sessionId, true);
 
-        const config = await this.getAntiSpamConfig(sessionId);
-        if (!config) {
-            this.processing.set(sessionId, false);
-            return;
-        }
-
-        while (true) {
-            const queue = this.queues.get(sessionId);
-            if (!queue || queue.length === 0) break;
-
-            const item = queue[0]; // Peek at front
-            const now = Date.now();
-            const history = this.sessionHistory.get(sessionId) || [];
-
-            // Clean history: keep only messages in the current window
-            const windowStart = now - (config.spamInterval * 1000);
-            const recentMessages = history.filter(ts => ts > windowStart);
-            this.sessionHistory.set(sessionId, recentMessages);
-
-            if (recentMessages.length >= config.spamLimit) {
-                // Rate limit reached — calculate and apply delay
-                const delay = Math.floor(
-                    Math.random() * (config.spamDelayMax - config.spamDelayMin + 1)
-                ) + config.spamDelayMin;
-
-                const sendAt = new Date(now + delay);
-                const waitingSince = now - item.queuedAt;
-
-                logger.warn("Anti-Spam", 
-                    `⏳ DELAY   | Session: ${sessionId} | #${item.id} | Rate: ${recentMessages.length}/${config.spamLimit} in ${config.spamInterval}s | Delay: ${delay}ms | Send at: ${sendAt.toLocaleTimeString()} | Waiting: ${waitingSince}ms | Queue: ${queue.length} remaining`
-                );
-
-                await this.sleep(delay);
-
-                // Re-fetch config (might have changed during delay)
-                const freshConfig = await this.getAntiSpamConfig(sessionId);
-                if (!freshConfig || !freshConfig.antiSpamEnabled) {
-                    // Anti-spam was disabled during delay, flush all
-                    logger.warn("Anti-Spam", `⚡ DISABLED | Session: ${sessionId} | Flushing ${queue.length} queued messages immediately`);
+        try {
+            const config = await this.getAntiSpamConfig(sessionId);
+            if (!config || !config.antiSpamEnabled) {
+                // Anti-spam disabled or missing config, flush all
+                const queue = this.queues.get(sessionId);
+                if (queue) {
                     while (queue.length > 0) {
                         const q = queue.shift()!;
                         this.recordSend(sessionId);
                         q.resolve();
                     }
-                    break;
                 }
-                continue; // Re-check rate after delay
+                return;
             }
 
-            // Rate is within limit — send this message
-            queue.shift(); // Remove from queue
-            this.recordSend(sessionId);
+            while (true) {
+                const queue = this.queues.get(sessionId);
+                if (!queue || queue.length === 0) break;
 
-            const totalWait = now - item.queuedAt;
-            const remainingInQueue = queue.length;
+                const item = queue[0]; // Peek at front
+                const now = Date.now();
+                const history = this.sessionHistory.get(sessionId) || [];
 
-            if (totalWait > 50) {
-                logger.success("Anti-Spam", 
-                    `✅ SENDING | Session: ${sessionId} | #${item.id} | To: ${this.formatJid(item.jid)} | Type: ${item.messageType} | Waited: ${totalWait}ms | Queue: ${remainingInQueue} remaining`
-                );
-            } else {
-                logger.success("Anti-Spam", 
-                    `✅ INSTANT | Session: ${sessionId} | #${item.id} | To: ${this.formatJid(item.jid)} | Type: ${item.messageType} | Rate: ${recentMessages.length + 1}/${config.spamLimit} | Queue: ${remainingInQueue} remaining`
-                );
+                // Clean history: keep only messages in the current window
+                const windowStart = now - (config.spamInterval * 1000);
+                const recentMessages = history.filter(ts => ts > windowStart);
+                this.sessionHistory.set(sessionId, recentMessages);
+
+                if (recentMessages.length >= config.spamLimit) {
+                    // Rate limit reached — calculate and apply delay
+                    const delay = Math.floor(
+                        Math.random() * (config.spamDelayMax - config.spamDelayMin + 1)
+                    ) + config.spamDelayMin;
+
+                    const sendAt = new Date(now + delay);
+                    const waitingSince = now - item.queuedAt;
+
+                    logger.warn("Anti-Spam", 
+                        `⏳ DELAY   | Session: ${sessionId} | #${item.id} | Rate: ${recentMessages.length}/${config.spamLimit} in ${config.spamInterval}s | Delay: ${delay}ms | Send at: ${sendAt.toLocaleTimeString()} | Waiting: ${waitingSince}ms | Queue: ${queue.length} remaining`
+                    );
+
+                    await this.sleep(delay);
+
+                    // Re-fetch config (might have changed during delay)
+                    const freshConfig = await this.getAntiSpamConfig(sessionId);
+                    if (!freshConfig || !freshConfig.antiSpamEnabled) {
+                        // Anti-spam was disabled during delay, flush all
+                        logger.warn("Anti-Spam", `⚡ DISABLED | Session: ${sessionId} | Flushing ${queue.length} queued messages immediately`);
+                        while (queue.length > 0) {
+                            const q = queue.shift()!;
+                            this.recordSend(sessionId);
+                            q.resolve();
+                        }
+                        break;
+                    }
+                    continue; // Re-check rate after delay
+                }
+
+                // Rate is within limit — send this message
+                queue.shift(); // Remove from queue
+                this.recordSend(sessionId);
+
+                const totalWait = now - item.queuedAt;
+                const remainingInQueue = queue.length;
+
+                if (totalWait > 50) {
+                    logger.success("Anti-Spam", 
+                        `✅ SENDING | Session: ${sessionId} | #${item.id} | To: ${this.formatJid(item.jid)} | Type: ${item.messageType} | Waited: ${totalWait}ms | Queue: ${remainingInQueue} remaining`
+                    );
+                } else {
+                    logger.success("Anti-Spam", 
+                        `✅ INSTANT | Session: ${sessionId} | #${item.id} | To: ${this.formatJid(item.jid)} | Type: ${item.messageType} | Rate: ${recentMessages.length + 1}/${config.spamLimit} | Queue: ${remainingInQueue} remaining`
+                    );
+                }
+
+                item.resolve();
             }
-
-            item.resolve();
+        } catch (err) {
+            logger.error("Anti-Spam", `Error processing queue for ${sessionId}:`, err);
+            const queue = this.queues.get(sessionId);
+            if (queue) {
+                while (queue.length > 0) {
+                    const q = queue.shift()!;
+                    q.resolve();
+                }
+            }
+        } finally {
+            this.processing.set(sessionId, false);
         }
-
-        this.processing.set(sessionId, false);
     }
 
     private recordSend(sessionId: string) {
