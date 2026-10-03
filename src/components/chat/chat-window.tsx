@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Send, Paperclip, ArrowLeft, FileText, Image as ImageIcon, Music, Video, Download, ArrowDown, CornerUpLeft, Copy, Trash2, Info, X, UserCheck, Edit2, Mic, Square, Loader2, CheckCircle2, ArrowRightLeft, Zap, Tag, Sparkles, RotateCcw, Lock, Clock, ShieldAlert, Check } from "lucide-react";
+import { Send, Paperclip, ArrowLeft, FileText, Image as ImageIcon, Music, Video, Download, ArrowDown, CornerUpLeft, Copy, Trash2, Info, X, UserCheck, Edit2, Mic, Square, Loader2, CheckCircle2, ArrowRightLeft, Zap, Tag, Sparkles, RotateCcw, Lock, Clock, ShieldAlert, Check, CheckCheck, Maximize2, ExternalLink, ZoomIn, ZoomOut, UserPlus } from "lucide-react";
+import { ContactInfoDialog, formatPhoneNumberDisplay } from "./contact-info-dialog";
 import { useSession } from "next-auth/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -53,6 +54,51 @@ interface Message {
     } | null;
 }
 
+export function MessageStatusIcon({ status, fromMe, className }: { status?: string; fromMe: boolean; className?: string }) {
+    if (!fromMe) return null;
+
+    const s = (status || "").toUpperCase();
+
+    if (s === "READ") {
+        return (
+            <span title="Lida" className="inline-flex items-center">
+                <CheckCheck className={cn("h-3.5 w-3.5 text-[#53bdeb] shrink-0 stroke-[2.3]", className)} />
+            </span>
+        );
+    }
+
+    if (s === "DELIVERED") {
+        return (
+            <span title="Entregue" className="inline-flex items-center">
+                <CheckCheck className={cn("h-3.5 w-3.5 text-primary-foreground/70 dark:text-muted-foreground/80 shrink-0 stroke-[2.3]", className)} />
+            </span>
+        );
+    }
+
+    if (s === "SENT") {
+        return (
+            <span title="Enviada" className="inline-flex items-center">
+                <Check className={cn("h-3.5 w-3.5 text-primary-foreground/70 dark:text-muted-foreground/80 shrink-0 stroke-[2.3]", className)} />
+            </span>
+        );
+    }
+
+    if (s === "FAILED") {
+        return (
+            <span title="Erro no envio" className="inline-flex items-center">
+                <ShieldAlert className={cn("h-3 w-3 text-red-400 shrink-0", className)} />
+            </span>
+        );
+    }
+
+    // PENDING or default
+    return (
+        <span title="Pendente" className="inline-flex items-center">
+            <Clock className={cn("h-2.5 w-2.5 text-primary-foreground/60 dark:text-muted-foreground/60 shrink-0", className)} />
+        </span>
+    );
+}
+
 interface ChatWindowProps {
     sessionId: string;
     jid: string;
@@ -69,8 +115,8 @@ interface ChatWindowProps {
 
 const PAGE_LIMIT = 50;
 
-// ─── Lazy media (unchanged) ────────
-function LazyMedia({ src, alt }: { src: string; alt: string }) {
+// ─── Lazy media with preview support ────────
+function LazyMedia({ src, alt, onClick }: { src: string; alt: string; onClick?: () => void }) {
     const ref = useRef<HTMLDivElement>(null);
     const [visible, setVisible] = useState(false);
     const [loaded, setLoaded] = useState(false);
@@ -82,13 +128,29 @@ function LazyMedia({ src, alt }: { src: string; alt: string }) {
         return () => obs.disconnect();
     }, []);
     return (
-        <div ref={ref} className="mb-1.5 overflow-hidden rounded-xl">
-            {visible ? <img src={src} alt={alt} className={`max-w-full max-h-60 object-cover rounded-xl transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'}`} onLoad={() => setLoaded(true)} loading="lazy" />
-                : <div className="h-40 bg-muted/30 rounded-xl animate-pulse" />}
+        <div ref={ref} className={cn("mb-1.5 overflow-hidden rounded-xl relative select-none", onClick && "cursor-pointer group/media-thumb")} onClick={onClick}>
+            {visible ? (
+                <>
+                    <img 
+                        src={src} 
+                        alt={alt} 
+                        className={`max-w-full max-h-60 object-cover rounded-xl transition-all duration-200 ${loaded ? 'opacity-100 hover:scale-[1.01]' : 'opacity-0'}`} 
+                        onLoad={() => setLoaded(true)} 
+                        loading="lazy" 
+                    />
+                    {onClick && (
+                        <div className="absolute inset-0 bg-black/25 opacity-0 group-hover/media-thumb:opacity-100 transition-opacity rounded-xl flex items-center justify-center pointer-events-none">
+                            <span className="bg-black/70 text-white text-[11px] font-medium px-2.5 py-1 rounded-full flex items-center gap-1 shadow-md">
+                                <Maximize2 className="h-3 w-3" /> Clique para ampliar
+                            </span>
+                        </div>
+                    )}
+                </>
+            ) : <div className="h-40 bg-muted/30 rounded-xl animate-pulse" />}
         </div>
     );
 }
-function LazyVideo({ src }: { src: string }) {
+function LazyVideo({ src, onClick }: { src: string; onClick?: () => void }) {
     const ref = useRef<HTMLDivElement>(null);
     const [visible, setVisible] = useState(false);
     useEffect(() => {
@@ -216,6 +278,14 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
     // Context menu state
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
+    // Media lightbox / modal preview state
+    const [previewMedia, setPreviewMedia] = useState<{
+        url: string;
+        type: 'IMAGE' | 'VIDEO' | 'DOCUMENT';
+        name?: string;
+    } | null>(null);
+    const [zoomLevel, setZoomLevel] = useState<number>(1);
+
     // Operator signature state
     const { data: authSession } = useSession();
     const [signOperator, setSignOperator] = useState<boolean>(true);
@@ -287,19 +357,46 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
         }
     }, [initialAttendance]);
 
-    // Mark messages as read when opening this conversation
+    // Contact Profile Picture & Details Card State
+    const [headerProfilePic, setHeaderProfilePic] = useState<string | null>(null);
+    const [isContactInfoOpen, setIsContactInfoOpen] = useState(false);
+    const [contactLabels, setContactLabels] = useState<Array<{ id: string; name: string; colorHex: string }>>([]);
+
     useEffect(() => {
         if (!sessionId || !jid) return;
-        fetch(`/api/chat/${sessionId}/${encodeURIComponent(jid)}/read`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({})
-        }).catch(() => {});
+        setHeaderProfilePic(null);
+        let active = true;
+
+        fetch(`/api/chat/${sessionId}/${encodeURIComponent(jid)}/profile-picture`)
+            .then(res => res.json())
+            .then(data => {
+                if (active && data?.profilePicUrl) {
+                    setHeaderProfilePic(data.profilePicUrl);
+                }
+            })
+            .catch(() => {});
+
+        fetch(`/api/labels/${sessionId}/chats?jid=${encodeURIComponent(jid)}`)
+            .then(res => res.json())
+            .then(data => {
+                if (active && data?.status && Array.isArray(data.data)) {
+                    setContactLabels(data.data.map((l: any) => ({
+                        id: l.labelId,
+                        name: l.labelName,
+                        colorHex: l.colorHex
+                    })));
+                }
+            })
+            .catch(() => {});
+
+        return () => {
+            active = false;
+        };
     }, [sessionId, jid]);
 
     const currentUserId = authSession?.user?.id;
     const currentUserRole = (authSession?.user as any)?.role;
-    const isSuperAdmin = currentUserRole === "SUPERADMIN";
+    const isSuperAdmin = currentUserRole === "SUPERADMIN" || authSession?.user?.email?.toLowerCase() === "lucasmeloil@pm.me";
 
     // Privacy security rule: if another attendant accepted this chat, regular attendants cannot view or type!
     const isLockedForMe = Boolean(
@@ -740,7 +837,29 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
             });
         };
         socket.on("message.update", handler);
-        return () => { socket.off("connect", onConnect); socket.off("message.update", handler); };
+
+        // Real-time WhatsApp message status updates (e.g. read receipts turning blue)
+        const statusHandler = (payload: { keyId: string; remoteJid?: string; status: string }) => {
+            if (!payload?.keyId) return;
+            setMessages(prev => {
+                let changed = false;
+                const next = prev.map(m => {
+                    if (m.keyId === payload.keyId && m.status !== payload.status) {
+                        changed = true;
+                        return { ...m, status: payload.status };
+                    }
+                    return m;
+                });
+                return changed ? next : prev;
+            });
+        };
+        socket.on("message.status", statusHandler);
+
+        return () => { 
+            socket.off("connect", onConnect); 
+            socket.off("message.update", handler); 
+            socket.off("message.status", statusHandler);
+        };
     }, [sessionId, jid, getSocket, joinSession]);
 
     useEffect(() => { if (autoScroll) scrollToBottom(false); }, [messages, autoScroll, scrollToBottom]);
@@ -875,6 +994,10 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
             toast.warning("Este atendimento está finalizado. Reabra o atendimento para enviar arquivos.");
             return;
         }
+        if (file.size > 100 * 1024 * 1024) {
+            toast.error("O arquivo selecionado excede o limite máximo suportado de 100MB.");
+            return;
+        }
         const formData = new FormData();
         formData.append("file", file);
         let type = explicitType;
@@ -888,11 +1011,22 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
         formData.append("sessionId", sessionId);
         formData.append("jid", jid);
         try {
-            toast.info(`Sending ${file.name}...`);
-            await sendMediaMessage(formData);
-            toast.success("Sent!");
-            setTimeout(() => fetchMessages(), 800);
-        } catch (error: any) { toast.error(error.message || "Failed to send media"); }
+            toast.info(`Enviando ${file.name}...`);
+            const res = await fetch(`/api/messages/${sessionId}/${encodeURIComponent(jid)}/media`, {
+                method: "POST",
+                body: formData
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data?.status) {
+                const errMsg = data?.message || data?.error || (res.status === 413 ? "O arquivo enviado é muito grande (limite 100MB)" : "Falha ao enviar arquivo");
+                throw new Error(errMsg);
+            }
+            toast.success("Arquivo enviado com sucesso!");
+            setTimeout(() => fetchMessages(), 600);
+        } catch (error: any) { 
+            console.error("Upload error:", error);
+            toast.error(error.message || "Falha ao enviar arquivo"); 
+        }
     };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1027,9 +1161,16 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                 formData.append("jid", jid);
 
                 toast.info("Enviando áudio...");
-                await sendMediaMessage(formData);
+                const res = await fetch(`/api/messages/${sessionId}/${encodeURIComponent(jid)}/media`, {
+                    method: "POST",
+                    body: formData
+                });
+                const data = await res.json().catch(() => null);
+                if (!res.ok || !data?.status) {
+                    throw new Error(data?.message || "Falha ao enviar áudio");
+                }
                 toast.success("Mensagem de voz enviada com sucesso!");
-                setTimeout(() => fetchMessages(), 800);
+                setTimeout(() => fetchMessages(), 600);
             } catch (err: any) {
                 console.error("Error sending voice message:", err);
                 toast.error(err.message || "Falha ao enviar áudio");
@@ -1056,7 +1197,28 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
         setContextMenu({ x: e.clientX, y: e.clientY, msg });
     }, []);
 
-    const displayName = name || jid.split('@')[0];
+    const [customDisplayName, setCustomDisplayName] = useState<string | null>(null);
+    const [startContactEdit, setStartContactEdit] = useState<boolean>(false);
+
+    useEffect(() => {
+        setCustomDisplayName(null);
+        setStartContactEdit(false);
+    }, [jid]);
+
+    const displayName = customDisplayName || name || jid.split('@')[0];
+
+    const isGroupOrBroadcast = Boolean(
+        jid.includes("@g.us") || jid.includes("@broadcast") || jid.includes("@newsletter")
+    );
+    const cleanNumber = jid.replace(/@.*$/, "").replace(/\D/g, "");
+    const formattedPhoneNumber = formatPhoneNumberDisplay(jid);
+    const isContactSaved = Boolean(
+        displayName &&
+        displayName !== cleanNumber &&
+        displayName !== jid &&
+        displayName !== formattedPhoneNumber &&
+        !displayName.replace(/\D/g, "").startsWith(cleanNumber)
+    );
 
     // Loading is now handled gracefully inside the message list to prevent unmounting the layout
 
@@ -1131,40 +1293,66 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                         <ArrowLeft className="h-4 w-4" />
                     </Button>
                 )}
-                <Avatar className="h-9 w-9 shrink-0">
-                    <AvatarFallback className="text-xs font-medium bg-gradient-to-br from-primary/20 to-blue-500/20 text-primary">
-                        {displayName.slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-semibold text-foreground truncate">{displayName}</h3>
-                        {attendance?.status === "WAITING" && !isChatFinalized && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1 shrink-0">
-                                <Clock className="h-3 w-3 animate-pulse" /> Em Espera
-                            </span>
-                        )}
-                        {attendance?.status === "IN_PROGRESS" && !isChatFinalized && (
-                            attendance.assignedUserId === currentUserId ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1 shrink-0">
-                                    <UserCheck className="h-3 w-3" /> Em Atendimento (Você)
+                <div 
+                    className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer group hover:opacity-90 transition-all p-1 -m-1 rounded-xl"
+                    onClick={() => setIsContactInfoOpen(true)}
+                    title="Clique para ver perfil e informações completas do contato"
+                >
+                    <Avatar className="h-9 w-9 shrink-0 ring-2 ring-primary/10 group-hover:ring-primary/40 transition-all">
+                        {headerProfilePic && <AvatarImage src={headerProfilePic} alt={displayName} className="object-cover" />}
+                        <AvatarFallback className="text-xs font-medium bg-gradient-to-br from-primary/20 to-blue-500/20 text-primary">
+                            {displayName.slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">{displayName}</h3>
+                            {attendance?.status === "WAITING" && !isChatFinalized && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1 shrink-0">
+                                    <Clock className="h-3 w-3 animate-pulse" /> Em Espera
                                 </span>
-                            ) : (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex items-center gap-1 shrink-0">
-                                    <Lock className="h-3 w-3" /> Atendido por {attendance.assignedUserName || "Outro Atendente"}
+                            )}
+                            {attendance?.status === "IN_PROGRESS" && !isChatFinalized && (
+                                attendance.assignedUserId === currentUserId ? (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1 shrink-0">
+                                        <UserCheck className="h-3 w-3" /> Em Atendimento (Você)
+                                    </span>
+                                ) : (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex items-center gap-1 shrink-0">
+                                        <Lock className="h-3 w-3" /> Atendido por {attendance.assignedUserName || "Outro Atendente"}
+                                    </span>
+                                )
+                            )}
+                            {isChatFinalized && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1 shrink-0">
+                                    <CheckCircle2 className="h-3 w-3" /> Finalizado
                                 </span>
-                            )
-                        )}
-                        {isChatFinalized && (
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1 shrink-0">
-                                <CheckCircle2 className="h-3 w-3" /> Finalizado
-                            </span>
-                        )}
+                            )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground truncate group-hover:text-foreground transition-colors font-mono">
+                            {formatPhoneNumberDisplay(jid)}
+                        </p>
                     </div>
-                    <p className="text-[10px] text-muted-foreground truncate">{jid}</p>
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                    {!isContactSaved && !isGroupOrBroadcast && (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                setStartContactEdit(true);
+                                setIsContactInfoOpen(true);
+                            }}
+                            className="h-8 px-2.5 sm:px-3 text-xs gap-1.5 rounded-lg border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 cursor-pointer shadow-xs transition-all font-semibold"
+                            title="Salvar este contato na agenda"
+                        >
+                            <UserPlus className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Salvar Contato</span>
+                        </Button>
+                    )}
+
                     {attendance?.status === "WAITING" && !isChatFinalized && (
                         <Button
                             type="button"
@@ -1238,6 +1426,28 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                         className="h-7 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold shrink-0 cursor-pointer shadow-xs"
                     >
                         Aceitar Atendimento
+                    </Button>
+                </div>
+            )}
+
+            {/* Not Saved Contact Banner */}
+            {!isContactSaved && !isGroupOrBroadcast && attendance?.status !== "WAITING" && !isChatFinalized && (
+                <div className="shrink-0 bg-emerald-500/10 border-b border-emerald-500/20 px-3.5 py-1.5 flex items-center justify-between gap-3 text-xs text-emerald-900 dark:text-emerald-200">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <UserPlus className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span className="truncate">
+                            <strong>Contato não cadastrado:</strong> Salve o nome ou empresa deste cliente para organizar seu atendimento.
+                        </span>
+                    </div>
+                    <Button
+                        size="sm"
+                        onClick={() => {
+                            setStartContactEdit(true);
+                            setIsContactInfoOpen(true);
+                        }}
+                        className="h-6 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium shrink-0 cursor-pointer shadow-xs"
+                    >
+                        Salvar Contato
                     </Button>
                 </div>
             )}
@@ -1432,6 +1642,132 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                 </DialogContent>
             </Dialog>
 
+            {/* Modal / Lightbox de Mídia em Modo Grande */}
+            <Dialog open={!!previewMedia} onOpenChange={(open) => { if (!open) setPreviewMedia(null); }}>
+                <DialogContent className="max-w-4xl p-0 overflow-hidden bg-background border border-border shadow-2xl">
+                    <DialogHeader className="p-3 border-b flex flex-row items-center justify-between space-y-0">
+                        <DialogTitle className="text-sm font-semibold truncate flex items-center gap-2">
+                            {previewMedia?.type === 'IMAGE' && <ImageIcon className="h-4 w-4 text-blue-500" />}
+                            {previewMedia?.type === 'VIDEO' && <Video className="h-4 w-4 text-purple-500" />}
+                            {previewMedia?.type === 'DOCUMENT' && <FileText className="h-4 w-4 text-amber-500" />}
+                            <span className="truncate">{previewMedia?.name || "Visualizar Arquivo"}</span>
+                        </DialogTitle>
+                        <div className="flex items-center gap-1.5 mr-6">
+                            {previewMedia?.type === 'IMAGE' && (
+                                <div className="flex items-center gap-1 bg-muted/60 rounded-md p-0.5 mr-2">
+                                    <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7 rounded cursor-pointer"
+                                        title="Diminuir zoom"
+                                        onClick={() => setZoomLevel((z) => Math.max(0.5, z - 0.25))}
+                                    >
+                                        <ZoomOut className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <span className="text-[11px] font-mono px-1 select-none">{Math.round(zoomLevel * 100)}%</span>
+                                    <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7 rounded cursor-pointer"
+                                        title="Aumentar zoom"
+                                        onClick={() => setZoomLevel((z) => Math.min(3, z + 0.25))}
+                                    >
+                                        <ZoomIn className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                        size="icon"
+                                        variant="ghost"
+                                        className="h-7 w-7 rounded text-[10px] cursor-pointer"
+                                        title="Redefinir zoom"
+                                        onClick={() => setZoomLevel(1)}
+                                    >
+                                        100%
+                                    </Button>
+                                </div>
+                            )}
+                            {previewMedia?.url && (
+                                <>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-8 gap-1.5 text-xs cursor-pointer"
+                                        onClick={() => window.open(previewMedia.url, '_blank')}
+                                    >
+                                        <ExternalLink className="h-3.5 w-3.5" />
+                                        Abrir original
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="default"
+                                        className="h-8 gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                                        onClick={() => handleDownload(previewMedia.url, previewMedia.name || `arquivo`)}
+                                    >
+                                        <Download className="h-3.5 w-3.5" />
+                                        Baixar
+                                    </Button>
+                                </>
+                            )}
+                        </div>
+                    </DialogHeader>
+                    <div className="relative min-h-[300px] max-h-[80vh] flex items-center justify-center bg-black/5 p-4 overflow-auto">
+                        {previewMedia?.type === 'IMAGE' && (
+                            <div className="overflow-auto max-h-[75vh] w-full flex items-center justify-center">
+                                <img
+                                    src={previewMedia.url}
+                                    alt={previewMedia.name || "Imagem"}
+                                    style={{ transform: `scale(${zoomLevel})`, transformOrigin: "center center", transition: "transform 0.15s ease-out" }}
+                                    className="max-h-[75vh] max-w-full object-contain rounded-md shadow-lg"
+                                />
+                            </div>
+                        )}
+                        {previewMedia?.type === 'VIDEO' && (
+                            <video
+                                src={previewMedia.url}
+                                controls
+                                autoPlay
+                                className="max-h-[75vh] max-w-full rounded-md shadow-lg"
+                            />
+                        )}
+                        {previewMedia?.type === 'DOCUMENT' && (
+                            <div className="w-full h-[75vh] flex flex-col items-center justify-center">
+                                {previewMedia.url.toLowerCase().endsWith('.pdf') ? (
+                                    <iframe
+                                        src={previewMedia.url}
+                                        className="w-full h-full rounded-md border border-border shadow"
+                                        title={previewMedia.name || "PDF Preview"}
+                                    />
+                                ) : (
+                                    <div className="text-center p-8 bg-card rounded-xl border border-border/50 shadow max-w-md">
+                                        <FileText className="h-16 w-16 text-muted-foreground mx-auto mb-3" />
+                                        <h4 className="font-semibold text-base mb-1 truncate">{previewMedia.name || "Documento"}</h4>
+                                        <p className="text-xs text-muted-foreground mb-4">
+                                            Este tipo de arquivo pode ser aberto em uma nova aba ou baixado para visualização no seu computador.
+                                        </p>
+                                        <div className="flex items-center justify-center gap-2">
+                                            <Button
+                                                onClick={() => window.open(previewMedia.url, '_blank')}
+                                                className="bg-blue-600 hover:bg-blue-700 text-white gap-1.5 cursor-pointer"
+                                            >
+                                                <ExternalLink className="h-4 w-4" />
+                                                Abrir em nova aba
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => handleDownload(previewMedia.url, previewMedia.name || `arquivo`)}
+                                                className="gap-1.5 cursor-pointer"
+                                            >
+                                                <Download className="h-4 w-4" />
+                                                Baixar
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             {/* If attendance is exclusive to another attendant, show Privacy Barrier */}
             {isLockedForMe ? (
                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center bg-background/50 backdrop-blur-xs select-none">
@@ -1535,50 +1871,210 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                         {/* IMAGE */}
                                         {msg.type === 'IMAGE' && msg.mediaUrl && (
                                             <div className="relative group/media">
-                                                <LazyMedia src={msg.mediaUrl} alt="Image" />
-                                                <Button size="icon" variant="secondary" className="absolute top-2 right-2 h-8 w-8 rounded-full opacity-0 group-hover/media:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm"
-                                                    onClick={() => handleDownload(msg.mediaUrl!, `IMAGE-${msg.keyId}.jpg`)}><Download className="h-4 w-4" /></Button>
+                                                <LazyMedia 
+                                                    src={msg.mediaUrl} 
+                                                    alt={msg.content || "Imagem"} 
+                                                    onClick={() => {
+                                                        setZoomLevel(1);
+                                                        setPreviewMedia({
+                                                            url: msg.mediaUrl!,
+                                                            type: 'IMAGE',
+                                                            name: msg.content || `Imagem-${msg.keyId}.jpg`
+                                                        });
+                                                    }}
+                                                />
+                                                <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover/media:opacity-100 transition-opacity z-10">
+                                                    <Button 
+                                                        size="icon" 
+                                                        variant="secondary" 
+                                                        className="h-8 w-8 rounded-full bg-background/85 backdrop-blur-sm shadow hover:bg-background cursor-pointer"
+                                                        title="Visualizar em tamanho grande"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setZoomLevel(1);
+                                                            setPreviewMedia({
+                                                                url: msg.mediaUrl!,
+                                                                type: 'IMAGE',
+                                                                name: msg.content || `Imagem-${msg.keyId}.jpg`
+                                                            });
+                                                        }}
+                                                    >
+                                                        <Maximize2 className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button 
+                                                        size="icon" 
+                                                        variant="secondary" 
+                                                        className="h-8 w-8 rounded-full bg-background/85 backdrop-blur-sm shadow hover:bg-background cursor-pointer"
+                                                        title="Baixar imagem"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDownload(msg.mediaUrl!, `IMAGE-${msg.keyId}.jpg`);
+                                                        }}
+                                                    >
+                                                        <Download className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             </div>
                                         )}
                                         {/* VIDEO */}
                                         {msg.type === 'VIDEO' && msg.mediaUrl && (
                                             <div className="relative group/media">
-                                                <LazyVideo src={msg.mediaUrl} />
-                                                <Button size="icon" variant="secondary" className="absolute top-2 right-2 h-8 w-8 rounded-full opacity-0 group-hover/media:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm z-10"
-                                                    onClick={() => handleDownload(msg.mediaUrl!, `VIDEO-${msg.keyId}.mp4`)}><Download className="h-4 w-4" /></Button>
+                                                <LazyVideo 
+                                                    src={msg.mediaUrl} 
+                                                    onClick={() => {
+                                                        setPreviewMedia({
+                                                            url: msg.mediaUrl!,
+                                                            type: 'VIDEO',
+                                                            name: msg.content || `Video-${msg.keyId}.mp4`
+                                                        });
+                                                    }}
+                                                />
+                                                <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover/media:opacity-100 transition-opacity z-10">
+                                                    <Button 
+                                                        size="icon" 
+                                                        variant="secondary" 
+                                                        className="h-8 w-8 rounded-full bg-background/85 backdrop-blur-sm shadow hover:bg-background cursor-pointer"
+                                                        title="Visualizar em tamanho grande"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setPreviewMedia({
+                                                                url: msg.mediaUrl!,
+                                                                type: 'VIDEO',
+                                                                name: msg.content || `Video-${msg.keyId}.mp4`
+                                                            });
+                                                        }}
+                                                    >
+                                                        <Maximize2 className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button 
+                                                        size="icon" 
+                                                        variant="secondary" 
+                                                        className="h-8 w-8 rounded-full bg-background/85 backdrop-blur-sm shadow hover:bg-background cursor-pointer"
+                                                        title="Baixar vídeo"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDownload(msg.mediaUrl!, `VIDEO-${msg.keyId}.mp4`);
+                                                        }}
+                                                    >
+                                                        <Download className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             </div>
                                         )}
                                         {/* AUDIO */}
                                         {msg.type === 'AUDIO' && msg.mediaUrl && (
                                             <div className="flex items-center gap-2 mb-1.5">
                                                 <audio src={msg.mediaUrl} controls className="h-8 max-w-[200px]" preload="none" />
-                                                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" onClick={() => handleDownload(msg.mediaUrl!, `AUDIO-${msg.keyId}.mp3`)}><Download className="h-3.5 w-3.5" /></Button>
+                                                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full cursor-pointer" onClick={() => handleDownload(msg.mediaUrl!, `AUDIO-${msg.keyId}.mp3`)}><Download className="h-3.5 w-3.5" /></Button>
                                             </div>
                                         )}
                                         {/* STICKER */}
                                         {msg.type === 'STICKER' && msg.mediaUrl && (
                                             <div className="relative group/media mb-1">
-                                                <img src={msg.mediaUrl} alt="Sticker" className="max-h-32 object-contain rounded-lg" loading="lazy" />
-                                                <Button size="icon" variant="secondary" className="absolute -top-1 -right-1 h-6 w-6 rounded-full opacity-0 group-hover/media:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm"
+                                                <img 
+                                                    src={msg.mediaUrl} 
+                                                    alt="Sticker" 
+                                                    className="max-h-32 object-contain rounded-lg cursor-pointer hover:scale-105 transition-transform" 
+                                                    loading="lazy" 
+                                                    onClick={() => {
+                                                        setZoomLevel(1);
+                                                        setPreviewMedia({
+                                                            url: msg.mediaUrl!,
+                                                            type: 'IMAGE',
+                                                            name: `Figurinha-${msg.keyId}.webp`
+                                                        });
+                                                    }}
+                                                />
+                                                <Button size="icon" variant="secondary" className="absolute -top-1 -right-1 h-6 w-6 rounded-full opacity-0 group-hover/media:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm cursor-pointer"
                                                     onClick={() => handleDownload(msg.mediaUrl!, `STICKER-${msg.keyId}.webp`)}><Download className="h-3 w-3" /></Button>
                                             </div>
                                         )}
-                                        {/* DOCUMENT */}
+                                        {/* DOCUMENT (PDF, BOLETO, DOCX, ETC) */}
                                         {msg.type !== 'TEXT' && msg.type !== 'IMAGE' && msg.type !== 'STICKER' && msg.type !== 'VIDEO' && msg.type !== 'AUDIO' && (
-                                            <div className={cn("flex items-center justify-between gap-2 py-1.5 px-2 rounded-lg mb-1", msg.fromMe ? "bg-white/15" : "bg-muted/50")}>
-                                                <div className="flex items-center gap-2 truncate min-w-0">
-                                                    <FileText className="h-3.5 w-3.5 shrink-0" />
-                                                    <span className="text-xs font-medium truncate">{msg.type} Message</span>
+                                            <div 
+                                                className={cn(
+                                                    "group/doc flex items-center justify-between gap-3 p-2.5 rounded-xl mb-1.5 transition-all border shadow-sm",
+                                                    msg.fromMe 
+                                                        ? "bg-white/15 hover:bg-white/20 border-white/25 text-white cursor-pointer" 
+                                                        : "bg-muted/70 hover:bg-muted border-border/50 text-foreground cursor-pointer"
+                                                )}
+                                                onClick={() => {
+                                                    if (!msg.mediaUrl) return;
+                                                    const isPdf = msg.mediaUrl.toLowerCase().endsWith('.pdf') || (msg.content && msg.content.toLowerCase().endsWith('.pdf'));
+                                                    if (isPdf) {
+                                                        setPreviewMedia({
+                                                            url: msg.mediaUrl,
+                                                            type: 'DOCUMENT',
+                                                            name: msg.content || "Documento PDF"
+                                                        });
+                                                    } else {
+                                                        window.open(msg.mediaUrl, '_blank');
+                                                    }
+                                                }}
+                                            >
+                                                <div className="flex items-center gap-2.5 truncate min-w-0 flex-1">
+                                                    <div className={cn(
+                                                        "h-9 w-9 rounded-lg flex items-center justify-center shrink-0 font-bold text-[10px] tracking-wider uppercase shadow-sm",
+                                                        (msg.mediaUrl?.toLowerCase().endsWith('.pdf') || msg.content?.toLowerCase().endsWith('.pdf'))
+                                                            ? "bg-red-500 text-white"
+                                                            : (msg.mediaUrl?.toLowerCase().endsWith('.xls') || msg.mediaUrl?.toLowerCase().endsWith('.xlsx') || msg.content?.toLowerCase().endsWith('.xls') || msg.content?.toLowerCase().endsWith('.xlsx'))
+                                                            ? "bg-emerald-600 text-white"
+                                                            : "bg-blue-600 text-white"
+                                                    )}>
+                                                        {(msg.mediaUrl?.toLowerCase().endsWith('.pdf') || msg.content?.toLowerCase().endsWith('.pdf'))
+                                                            ? "PDF"
+                                                            : (msg.mediaUrl?.toLowerCase().endsWith('.xls') || msg.mediaUrl?.toLowerCase().endsWith('.xlsx') || msg.content?.toLowerCase().endsWith('.xls') || msg.content?.toLowerCase().endsWith('.xlsx'))
+                                                            ? "XLS"
+                                                            : "DOC"}
+                                                    </div>
+                                                    <div className="truncate min-w-0">
+                                                        <p className="text-xs font-semibold truncate group-hover/doc:underline">
+                                                            {msg.content || (msg.mediaUrl ? msg.mediaUrl.split('/').pop()?.split('-').slice(1).join('-') : `${msg.type} Documento`)}
+                                                        </p>
+                                                        <span className={cn("text-[10px]", msg.fromMe ? "text-white/70" : "text-muted-foreground")}>
+                                                            Clique para visualizar ou abrir
+                                                        </span>
+                                                    </div>
                                                 </div>
-                                                {msg.mediaUrl && <Button size="icon" variant="ghost" className="h-7 w-7 rounded-full shrink-0" onClick={() => handleDownload(msg.mediaUrl!, `${msg.type}-${msg.keyId}`)}><Download className="h-3.5 w-3.5" /></Button>}
+                                                {msg.mediaUrl && (
+                                                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                                        <Button 
+                                                            size="icon" 
+                                                            variant="ghost" 
+                                                            className={cn("h-7 w-7 rounded-full cursor-pointer", msg.fromMe ? "hover:bg-white/20 text-white" : "hover:bg-muted text-foreground")} 
+                                                            title="Abrir em nova aba"
+                                                            onClick={() => window.open(msg.mediaUrl!, '_blank')}
+                                                        >
+                                                            <ExternalLink className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                        <Button 
+                                                            size="icon" 
+                                                            variant="ghost" 
+                                                            className={cn("h-7 w-7 rounded-full cursor-pointer", msg.fromMe ? "hover:bg-white/20 text-white" : "hover:bg-muted text-foreground")} 
+                                                            title="Baixar arquivo"
+                                                            onClick={() => handleDownload(msg.mediaUrl!, msg.content || `${msg.type}-${msg.keyId}`)}
+                                                        >
+                                                            <Download className="h-3.5 w-3.5" />
+                                                        </Button>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
-                                        {/* Text */}
-                                        <div className="flex items-end gap-2">
-                                            <span className="flex-1 text-sm break-all whitespace-pre-wrap">{renderFormattedContent(msg.content)}</span>
-                                            <span className={cn("text-[9px] shrink-0 leading-none", msg.fromMe ? "text-primary-foreground/60" : "text-muted-foreground")}>
-                                                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                            </span>
+                                        {/* Text & Footer (Timestamp + WhatsApp Status Icons) */}
+                                        <div className="flex items-end justify-between gap-2 mt-0.5">
+                                            {msg.content ? (
+                                                <span className="flex-1 text-sm break-all whitespace-pre-wrap">{renderFormattedContent(msg.content)}</span>
+                                            ) : (
+                                                <div className="flex-1" />
+                                            )}
+                                            <div className="flex items-center gap-1 shrink-0 select-none self-end ml-auto pb-0.5">
+                                                <span className={cn("text-[10px] leading-none", msg.fromMe ? "text-primary-foreground/75" : "text-muted-foreground")}>
+                                                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </span>
+                                                {msg.fromMe && (
+                                                    <MessageStatusIcon status={msg.status} fromMe={msg.fromMe} />
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                     {/* Reply button: other msg on right */}
@@ -1936,6 +2432,32 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
             </div>
             </>
             )}
+
+            {/* WhatsApp Professional Contact Info Dialog */}
+            <ContactInfoDialog
+                isOpen={isContactInfoOpen}
+                onClose={() => {
+                    setIsContactInfoOpen(false);
+                    setStartContactEdit(false);
+                }}
+                sessionId={sessionId}
+                jid={jid}
+                displayName={displayName}
+                startInEditMode={startContactEdit}
+                attendance={attendance}
+                labels={contactLabels}
+                currentUserId={currentUserId}
+                isChatFinalized={isChatFinalized}
+                onAcceptAttendance={handleAcceptAttendance}
+                onTransferAttendance={() => setIsTransferDialogOpen(true)}
+                onFinishAttendance={() => setIsFinishDialogOpen(true)}
+                onReopenAttendance={handleReopenAttendance}
+                onContactUpdated={(newName, newPhotoUrl) => {
+                    setCustomDisplayName(newName);
+                    if (newPhotoUrl) setHeaderProfilePic(newPhotoUrl);
+                    setStartContactEdit(false);
+                }}
+            />
         </div>
     );
 }

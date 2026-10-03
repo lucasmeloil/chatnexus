@@ -36,13 +36,21 @@ export async function generateMetadata(): Promise<Metadata> {
     console.error("Failed to fetch system config for metadata:", e);
   }
 
-  const appDefaultTitle = `${appName} | Gateway de WhatsApp`;
+  const appDefaultTitle = "NEXUS CHAT";
 
   return {
     metadataBase: new URL(APP_URL),
     title: {
-      default: appDefaultTitle,
-      template: `%s | ${appName}`,
+      default: "Nexus Chat | Multi Atendimento",
+      template: "%s | NEXUS CHAT",
+    },
+    icons: {
+      icon: [
+        { url: "/nexus-icon.png", type: "image/png" },
+        { url: "/favicon.ico" },
+      ],
+      apple: "/nexus-icon.png",
+      shortcut: "/nexus-icon.png",
     },
     description: APP_DESCRIPTION,
     applicationName: appName,
@@ -101,6 +109,9 @@ export default function RootLayout({
     <html lang="pt-BR" suppressHydrationWarning className="scroll-smooth notranslate" translate="no">
       <head>
         <meta name="google" content="notranslate" />
+        <link rel="icon" href="/nexus-icon.png" type="image/png" />
+        <link rel="shortcut icon" href="/nexus-icon.png" type="image/png" />
+        <link rel="apple-touch-icon" href="/nexus-icon.png" />
         {/* Conditional robots meta (noindex for staging/dev) */}
         {!allowIndexing && <meta name="robots" content="noindex, nofollow" />}
         {/* DNS prefetch for performance */}

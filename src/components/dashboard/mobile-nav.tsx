@@ -98,6 +98,7 @@ export function MobileNav({ appName = "NEXUS CHAT" }: { appName?: string }) {
     const { data: session } = useSession();
     // @ts-ignore
     const userRole = session?.user?.role;
+    const isSuperAdmin = userRole === "SUPERADMIN" || session?.user?.email?.toLowerCase() === "lucasmeloil@pm.me";
 
     const isActive = (href: string) => {
         if (href === "/dashboard") return pathname === "/dashboard";
@@ -123,7 +124,7 @@ export function MobileNav({ appName = "NEXUS CHAT" }: { appName?: string }) {
                 <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-1">
                     {navGroups.map((group) => {
                         const visibleItems = group.items.filter(
-                            (item) => !item.superadminOnly || userRole === "SUPERADMIN"
+                            (item) => !item.superadminOnly || isSuperAdmin
                         );
                         if (visibleItems.length === 0) return null;
 

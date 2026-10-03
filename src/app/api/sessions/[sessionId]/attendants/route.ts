@@ -13,12 +13,12 @@ export async function GET(
         const { sessionId } = await params;
         const user = await getAuthenticatedUser(request);
         if (!user) {
-            return NextResponse.json({ status: false, message: "Unauthorized" }, { status: 401 });
+            return NextResponse.json({ status: false, message: "Não autorizado" }, { status: 401 });
         }
 
         const canAccess = await canAccessSession(user.id, user.role, sessionId);
         if (!canAccess) {
-            return NextResponse.json({ status: false, message: "Forbidden" }, { status: 403 });
+            return NextResponse.json({ status: false, message: "Acesso negado à sessão" }, { status: 403 });
         }
 
         // Get session record
@@ -28,10 +28,10 @@ export async function GET(
         });
 
         if (!sessionRecord) {
-            return NextResponse.json({ status: false, message: "Session not found" }, { status: 404 });
+            return NextResponse.json({ status: false, message: "Sessão não encontrada" }, { status: 404 });
         }
 
-        // Get all accesses
+        // Get all accesses granted specifically to this session
         const accesses = await prisma.sessionAccess.findMany({
             where: { sessionId: sessionRecord.id },
             include: {
@@ -42,28 +42,17 @@ export async function GET(
             orderBy: { createdAt: "desc" }
         });
 
-        // Collect users
-        const usersList: any[] = accesses.map(a => a.user);
+        // Collect users with access
+        const usersList: any[] = accesses.map(a => a.user).filter(Boolean);
 
-        // Also include the session owner if not already in list
-        if (!usersList.some(u => u.id === sessionRecord.userId)) {
-            const owner = await prisma.user.findUnique({
-                where: { id: sessionRecord.userId },
-                select: { id: true, name: true, email: true, role: true, createdAt: true }
-            });
-            if (owner) usersList.push(owner);
-        }
+        // Include the session owner at the beginning if not already in list
+        const owner = await prisma.user.findUnique({
+            where: { id: sessionRecord.userId },
+            select: { id: true, name: true, email: true, role: true, createdAt: true }
+        });
 
-        // If list is still small or only 1, include other system attendants so transfer is always possible
-        if (usersList.length <= 1) {
-            const allUsers = await prisma.user.findMany({
-                select: { id: true, name: true, email: true, role: true, createdAt: true }
-            });
-            for (const u of allUsers) {
-                if (!usersList.some(existing => existing.id === u.id)) {
-                    usersList.push(u);
-                }
-            }
+        if (owner && !usersList.some(u => u.id === owner.id)) {
+            usersList.unshift(owner);
         }
 
         // Enrich with attendant configs (allowedTags)
@@ -76,6 +65,7 @@ export async function GET(
                     name: u.name,
                     email: u.email,
                     role: u.role,
+                    isOwner: u.id === sessionRecord.userId,
                     allowedTags: config?.allowedTags || [],
                     createdAt: u.createdAt
                 };
@@ -88,7 +78,7 @@ export async function GET(
         });
     } catch (error: any) {
         console.error("Get attendants error:", error);
-        return NextResponse.json({ status: false, message: error.message || "Failed to load attendants" }, { status: 500 });
+        return NextResponse.json({ status: false, message: error.message || "Falha ao carregar atendentes" }, { status: 500 });
     }
 }
 
@@ -101,12 +91,12 @@ export async function POST(
         const { sessionId } = await params;
         const currentUser = await getAuthenticatedUser(request);
         if (!currentUser) {
-            return NextResponse.json({ status: false, message: "Unauthorized" }, { status: 401 });
+            return NextResponse.json({ status: false, message: "Não autorizado" }, { status: 401 });
         }
 
         const canAccess = await canAccessSession(currentUser.id, currentUser.role, sessionId);
         if (!canAccess) {
-            return NextResponse.json({ status: false, message: "Forbidden" }, { status: 403 });
+            return NextResponse.json({ status: false, message: "Acesso negado à sessão" }, { status: 403 });
         }
 
         const sessionRecord = await prisma.session.findUnique({
@@ -115,14 +105,14 @@ export async function POST(
         });
 
         if (!sessionRecord) {
-            return NextResponse.json({ status: false, message: "Session not found" }, { status: 404 });
+            return NextResponse.json({ status: false, message: "Sessão não encontrada" }, { status: 404 });
         }
 
         const body = await request.json();
-        const { name, email, password, allowedTags } = body;
+        const { name, email, password, role, allowedTags } = body;
 
         if (!email?.trim()) {
-            return NextResponse.json({ status: false, message: "Email é obrigatório" }, { status: 400 });
+            return NextResponse.json({ status: false, message: "E-mail é obrigatório" }, { status: 400 });
         }
 
         const cleanEmail = email.trim().toLowerCase();
@@ -141,22 +131,29 @@ export async function POST(
                     email: cleanEmail,
                     name: name?.trim() || cleanEmail.split("@")[0],
                     password: hashedPassword,
-                    role: "STAFF"
+                    role: role === "OWNER" ? "OWNER" : "STAFF"
                 }
             });
-        } else if (password && password.length >= 4) {
-            // Update password if specified
-            const hashedPassword = await bcrypt.hash(password, 10);
-            await prisma.user.update({
-                where: { id: targetUser.id },
-                data: {
-                    name: name?.trim() || targetUser.name,
-                    password: hashedPassword
-                }
-            });
+        } else {
+            // User exists: update optional name, password, or role
+            const updateData: any = {};
+            if (name?.trim()) updateData.name = name.trim();
+            if (password && password.length >= 4) {
+                updateData.password = await bcrypt.hash(password, 10);
+            }
+            if (role && ["STAFF", "OWNER"].includes(role)) {
+                updateData.role = role;
+            }
+
+            if (Object.keys(updateData).length > 0) {
+                targetUser = await prisma.user.update({
+                    where: { id: targetUser.id },
+                    data: updateData
+                });
+            }
         }
 
-        // Ensure session access
+        // Link attendant to this session
         await prisma.sessionAccess.upsert({
             where: {
                 sessionId_userId: {
@@ -182,16 +179,17 @@ export async function POST(
                 userId: targetUser.id,
                 name: targetUser.name,
                 email: targetUser.email,
+                role: targetUser.role,
                 allowedTags: tags
             }
         });
     } catch (error: any) {
         console.error("Create attendant error:", error);
-        return NextResponse.json({ status: false, message: error.message || "Failed to create attendant" }, { status: 500 });
+        return NextResponse.json({ status: false, message: error.message || "Falha ao cadastrar atendente" }, { status: 500 });
     }
 }
 
-// PUT: Update an attendant's allowedTags or password
+// PUT: Update an attendant's name, email, password, role or allowedTags
 export async function PUT(
     request: NextRequest,
     { params }: { params: Promise<{ sessionId: string }> }
@@ -200,25 +198,65 @@ export async function PUT(
         const { sessionId } = await params;
         const currentUser = await getAuthenticatedUser(request);
         if (!currentUser) {
-            return NextResponse.json({ status: false, message: "Unauthorized" }, { status: 401 });
+            return NextResponse.json({ status: false, message: "Não autorizado" }, { status: 401 });
         }
 
         const canAccess = await canAccessSession(currentUser.id, currentUser.role, sessionId);
         if (!canAccess) {
-            return NextResponse.json({ status: false, message: "Forbidden" }, { status: 403 });
+            return NextResponse.json({ status: false, message: "Acesso negado à sessão" }, { status: 403 });
+        }
+
+        const sessionRecord = await prisma.session.findUnique({
+            where: { sessionId },
+            select: { id: true, userId: true }
+        });
+
+        if (!sessionRecord) {
+            return NextResponse.json({ status: false, message: "Sessão não encontrada" }, { status: 404 });
         }
 
         const body = await request.json();
-        const { userId, allowedTags, password, name } = body;
+        const { userId, allowedTags, password, name, email, role } = body;
 
         if (!userId) {
-            return NextResponse.json({ status: false, message: "User ID is required" }, { status: 400 });
+            return NextResponse.json({ status: false, message: "ID do usuário é obrigatório" }, { status: 400 });
+        }
+
+        const existingUser = await prisma.user.findUnique({
+            where: { id: userId }
+        });
+
+        if (!existingUser) {
+            return NextResponse.json({ status: false, message: "Usuário não encontrado" }, { status: 404 });
         }
 
         const userUpdateData: any = {};
-        if (name?.trim()) userUpdateData.name = name.trim();
-        if (password && password.length >= 4) {
-            userUpdateData.password = await bcrypt.hash(password, 10);
+        if (name?.trim() && name.trim() !== existingUser.name) {
+            userUpdateData.name = name.trim();
+        }
+
+        if (email?.trim()) {
+            const cleanEmail = email.trim().toLowerCase();
+            if (cleanEmail !== existingUser.email) {
+                const emailInUse = await prisma.user.findUnique({
+                    where: { email: cleanEmail }
+                });
+                if (emailInUse && emailInUse.id !== userId) {
+                    return NextResponse.json({ status: false, message: "Este e-mail já está sendo utilizado por outro usuário" }, { status: 400 });
+                }
+                userUpdateData.email = cleanEmail;
+            }
+        }
+
+        if (password && password.trim().length >= 4) {
+            userUpdateData.password = await bcrypt.hash(password.trim(), 10);
+        }
+
+        if (role && ["STAFF", "OWNER", "SUPERADMIN"].includes(role)) {
+            // Cannot change session owner's role from here
+            if (userId !== sessionRecord.userId) {
+                userUpdateData.role = role;
+            }
         }
 
         if (Object.keys(userUpdateData).length > 0) {
@@ -234,15 +272,15 @@ export async function PUT(
 
         return NextResponse.json({
             status: true,
-            message: "Configurações do atendente atualizadas com sucesso!"
+            message: "Configurações e dados do atendente atualizados com sucesso!"
         });
     } catch (error: any) {
         console.error("Update attendant error:", error);
-        return NextResponse.json({ status: false, message: error.message || "Failed to update attendant" }, { status: 500 });
+        return NextResponse.json({ status: false, message: error.message || "Falha ao atualizar atendente" }, { status: 500 });
     }
 }
 
-// DELETE: Revoke access of an attendant
+// DELETE: Revoke access or permanently delete an attendant
 export async function DELETE(
     request: NextRequest,
     { params }: { params: Promise<{ sessionId: string }> }
@@ -251,30 +289,42 @@ export async function DELETE(
         const { sessionId } = await params;
         const currentUser = await getAuthenticatedUser(request);
         if (!currentUser) {
-            return NextResponse.json({ status: false, message: "Unauthorized" }, { status: 401 });
+            return NextResponse.json({ status: false, message: "Não autorizado" }, { status: 401 });
         }
 
         const canAccess = await canAccessSession(currentUser.id, currentUser.role, sessionId);
         if (!canAccess) {
-            return NextResponse.json({ status: false, message: "Forbidden" }, { status: 403 });
+            return NextResponse.json({ status: false, message: "Acesso negado à sessão" }, { status: 403 });
         }
 
         const sessionRecord = await prisma.session.findUnique({
             where: { sessionId },
-            select: { id: true }
+            select: { id: true, userId: true }
         });
 
         if (!sessionRecord) {
-            return NextResponse.json({ status: false, message: "Session not found" }, { status: 404 });
+            return NextResponse.json({ status: false, message: "Sessão não encontrada" }, { status: 404 });
         }
 
         const { searchParams } = new URL(request.url);
         const userId = searchParams.get("userId");
+        const permanent = searchParams.get("permanent") === "true";
 
         if (!userId) {
-            return NextResponse.json({ status: false, message: "User ID is required" }, { status: 400 });
+            return NextResponse.json({ status: false, message: "ID do usuário é obrigatório" }, { status: 400 });
         }
 
+        // Prevent deleting oneself
+        if (userId === currentUser.id) {
+            return NextResponse.json({ status: false, message: "Você não pode revogar ou excluir seu próprio usuário" }, { status: 400 });
+        }
+
+        // Prevent deleting session owner
+        if (userId === sessionRecord.userId) {
+            return NextResponse.json({ status: false, message: "Não é possível remover o proprietário desta sessão" }, { status: 400 });
+        }
+
+        // 1. Delete session access for this session
         await prisma.sessionAccess.deleteMany({
             where: {
                 sessionId: sessionRecord.id,
@@ -282,12 +332,36 @@ export async function DELETE(
             }
         });
 
+        // 2. If permanent deletion is requested, delete user and associated configurations
+        if (permanent) {
+            // Delete all other session accesses
+            await prisma.sessionAccess.deleteMany({
+                where: { userId }
+            }).catch(() => {});
+
+            // Delete attendant config
+            await AttendanceService.deleteAttendantConfig(userId).catch(() => {});
+
+            // Unassign pending / active chats
+            await prisma.$executeRawUnsafe(
+                `UPDATE \`ChatAttendance\` SET assignedUserId = NULL, assignedUserName = NULL, status = 'WAITING' WHERE assignedUserId = ?`,
+                userId
+            ).catch(() => {});
+
+            // Delete the user record
+            await prisma.user.delete({
+                where: { id: userId }
+            }).catch(e => console.error("Error deleting user from database:", e));
+        }
+
         return NextResponse.json({
             status: true,
-            message: "Acesso do atendente revogado com sucesso"
+            message: permanent 
+                ? "Atendente excluído definitivamente do sistema com sucesso!" 
+                : "Acesso do atendente revogado desta sessão com sucesso!"
         });
     } catch (error: any) {
         console.error("Delete attendant error:", error);
-        return NextResponse.json({ status: false, message: error.message || "Failed to revoke attendant access" }, { status: 500 });
+        return NextResponse.json({ status: false, message: error.message || "Falha ao remover atendente" }, { status: 500 });
     }
 }

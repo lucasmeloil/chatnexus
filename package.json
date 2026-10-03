@@ -4,7 +4,7 @@
   "private": false,
   "license": "MIT",
   "scripts": {
-    "dev": "npx tsx src/server/index.ts",
+    "dev": "node --max-old-space-size=4096 node_modules/tsx/dist/cli.mjs src/server/index.ts",
     "build": "next build",
     "start": "NODE_ENV=production npx tsx src/server/index.ts",
     "lint": "eslint",

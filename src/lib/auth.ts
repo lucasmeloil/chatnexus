@@ -5,6 +5,8 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { authConfig } from "@/auth.config";
 
+const MASTER_ADMIN_EMAIL = "lucasmeloil@pm.me";
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
   providers: [
@@ -15,18 +17,27 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
       authorize: async (credentials) => {
         const parsedCredentials = z
-          .object({ email: z.string().email(), password: z.string().min(6) })
+          .object({ email: z.string().email(), password: z.string().min(1) })
           .safeParse(credentials);
 
         if (parsedCredentials.success) {
           const { email, password } = parsedCredentials.data;
+          const cleanEmail = email.trim().toLowerCase();
           
-          const user = await prisma.user.findUnique({ where: { email } });
+          const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
           if (!user) return null;
 
           const passwordsMatch = await bcrypt.compare(password, user.password);
 
           if (passwordsMatch) {
+             // Guarantee Master Admin has SUPERADMIN role
+             if (cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase() && user.role !== "SUPERADMIN") {
+               await prisma.user.update({
+                 where: { id: user.id },
+                 data: { role: "SUPERADMIN" },
+               }).catch(() => {});
+               user.role = "SUPERADMIN";
+             }
              return user;
           }
         }

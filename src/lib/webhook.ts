@@ -447,11 +447,19 @@ export async function downloadAndSaveMedia(message: WAMessage, sessionId: string
 
         let ext = extMap[messageType] || 'bin';
 
-        // Try to get extension from mimetype if available
-        const mime = (messageContent as any)[messageType]?.mimetype;
-        if (mime) {
-            const mimeExt = mime.split('/')[1]?.split(';')[0];
-            if (mimeExt) ext = mimeExt;
+        // Prefer explicit document fileName extension if available
+        const docFileName = (messageContent as any)[messageType]?.fileName;
+        if (docFileName && typeof docFileName === 'string' && docFileName.includes('.')) {
+            const parsedExt = docFileName.split('.').pop()?.toLowerCase();
+            if (parsedExt) ext = parsedExt;
+        } else {
+            // Try to get extension from mimetype if available
+            const mime = (messageContent as any)[messageType]?.mimetype;
+            if (mime) {
+                const mimeExt = mime.split('/')[1]?.split(';')[0]?.toLowerCase();
+                if (mimeExt === 'jpeg') ext = 'jpg';
+                else if (mimeExt) ext = mimeExt;
+            }
         }
 
         const filename = `${sessionId}-${message.key.id}.${ext}`;

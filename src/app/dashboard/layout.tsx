@@ -19,7 +19,7 @@ export default async function DashboardLayout({
     const session = await auth();
     const systemConfig = await prisma.systemConfig.findUnique({ where: { id: "default" } });
     const appName = systemConfig?.appName || process.env.APP_NAME || "NEXUS CHAT";
-    const registrationEnabled = systemConfig?.enableRegistration ?? true;
+    const registrationEnabled = systemConfig?.enableRegistration ?? false;
 
     return (
         <SessionProvider>

@@ -1,5 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
 
+const MASTER_ADMIN_EMAIL = "lucasmeloil@pm.me";
+
 export const authConfig = {
     pages: {
         signIn: '/auth/login',
@@ -21,13 +23,19 @@ export const authConfig = {
             if (user) {
                 token.id = user.id;
                 token.role = (user as any).role;
+                token.email = user.email;
+            }
+            if (token.email && token.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+                token.role = "SUPERADMIN";
             }
             return token;
         },
         async session({ session, token }) {
             if (token && session.user) {
                 session.user.id = token.id as string;
-                (session.user as any).role = token.role;
+                const isMaster = (token.email && token.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) || 
+                                 (session.user.email && session.user.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase());
+                (session.user as any).role = isMaster ? "SUPERADMIN" : token.role;
             }
             return session;
         }

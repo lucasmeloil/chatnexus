@@ -58,7 +58,7 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
         if (isLiveNotify) {
             for (const msg of messages) {
                 const jid = msg.key?.remoteJid;
-                if (!msg.key?.fromMe && jid && !jid.includes('status@broadcast')) {
+                if (!msg.key?.fromMe && jid && !jid.includes('status@broadcast') && !jid.includes('@newsletter') && !jid.includes('@broadcast')) {
                     const altJid = msg.key?.remoteJidAlt;
                     let effectiveJid = jid;
                     if (isLidJid(jid)) {
@@ -107,9 +107,15 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
             }
         }
 
-        // Emit to socket room for real-time frontend updates
+        // Emit to socket room for real-time frontend updates (ignore newsletters & broadcasts)
         if (type === 'notify' || type === 'append') {
-            io?.to(sessionId).emit('message.upsert', { messages, type });
+            const cleanMessages = messages.filter(m => {
+                const jid = m.key?.remoteJid;
+                return jid && !jid.includes('status@broadcast') && !jid.includes('@newsletter') && !jid.includes('@broadcast');
+            });
+            if (cleanMessages.length > 0) {
+                io?.to(sessionId).emit('message.upsert', { messages: cleanMessages, type });
+            }
         }
 
         // Ensure we have the database session ID
@@ -256,36 +262,101 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
 
     // Handle Message Status Updates
     sock.ev.on('messages.update', async (updates) => {
-        if (!dbSessionId) return;
+        const currentDbSessionId = await getDbSessionId();
+        if (!currentDbSessionId) return;
 
         for (const update of updates) {
             try {
                 const keyId = update.key?.id;
                 if (!keyId) continue;
 
-                const statusMap: Record<number, string> = {
-                    0: 'PENDING',
-                    1: 'SENT',
-                    2: 'DELIVERED',
-                    3: 'READ',
-                    4: 'READ', // Played
+                // Baileys WAMessageStatus (proto.WebMessageInfo.Status):
+                // 0 = ERROR, 1 = PENDING, 2 = SERVER_ACK (SENT), 3 = DELIVERY_ACK (DELIVERED), 4 = READ, 5 = PLAYED
+                const statusMap: Record<string | number, string> = {
+                    0: 'FAILED',
+                    1: 'PENDING',
+                    2: 'SENT',
+                    3: 'DELIVERED',
+                    4: 'READ',
+                    5: 'READ',
+                    'ERROR': 'FAILED',
+                    'PENDING': 'PENDING',
+                    'SERVER_ACK': 'SENT',
+                    'DELIVERY_ACK': 'DELIVERED',
+                    'READ': 'READ',
+                    'PLAYED': 'READ',
+                    'SENT': 'SENT',
+                    'DELIVERED': 'DELIVERED',
+                    'FAILED': 'FAILED'
                 };
 
-                const status = statusMap[update.update?.status || 0] || 'PENDING';
+                const rawStatus = (update.update as any)?.status;
+                if (rawStatus === undefined || rawStatus === null) continue;
+
+                const status = statusMap[rawStatus];
+                if (!status) continue;
 
                 await prisma.message.updateMany({
-                    where: { sessionId: dbSessionId, keyId },
+                    where: { sessionId: currentDbSessionId, keyId },
                     data: { status: status as any }
+                });
+
+                const targetRemoteJid = update.key?.remoteJid;
+                logger.debug("Store", `Message status update: ${keyId} -> ${status} (${targetRemoteJid})`);
+
+                // Emit to socket room for real-time frontend ticks update
+                io?.to(sessionId).emit('message.status', {
+                    keyId,
+                    remoteJid: targetRemoteJid,
+                    status
                 });
 
                 // Dispatch webhook for message status update
                 dispatchWebhook(sessionId, "message.status", {
                     keyId,
-                    remoteJid: update.key?.remoteJid,
+                    remoteJid: targetRemoteJid,
                     status
                 });
             } catch (e) {
                 logger.error("Store", "Error updating message status", e);
+            }
+        }
+    });
+
+    // Handle Message Receipts (read and delivery receipts from recipient)
+    sock.ev.on('message-receipt.update', async (receipts) => {
+        const currentDbSessionId = await getDbSessionId();
+        if (!currentDbSessionId) return;
+
+        for (const r of receipts) {
+            try {
+                const keyId = r.key?.id;
+                if (!keyId) continue;
+
+                const isRead = !!(r.receipt?.readTimestamp || r.receipt?.playedTimestamp);
+                const status = isRead ? 'READ' : 'DELIVERED';
+
+                await prisma.message.updateMany({
+                    where: { sessionId: currentDbSessionId, keyId },
+                    data: { status: status as any }
+                });
+
+                const targetRemoteJid = r.key?.remoteJid;
+                logger.debug("Store", `Message receipt update: ${keyId} -> ${status} (${targetRemoteJid})`);
+
+                io?.to(sessionId).emit('message.status', {
+                    keyId,
+                    remoteJid: targetRemoteJid,
+                    status
+                });
+
+                dispatchWebhook(sessionId, "message.status", {
+                    keyId,
+                    remoteJid: targetRemoteJid,
+                    status
+                });
+            } catch (e) {
+                logger.error("Store", "Error updating message receipt", e);
             }
         }
     });
@@ -390,6 +461,11 @@ async function processAndSaveMessage(
     // Filter out Protocol & Empty Messages
     if (!msg.message) return false;
     if (!keyId || !remoteJid) return false;
+
+    // Ignore WhatsApp Newsletter channels and Status broadcast completely
+    if (remoteJid.includes('@newsletter') || remoteJid.includes('status@broadcast') || remoteJid.includes('@broadcast')) {
+        return null;
+    }
 
     // Ignore specific technical message types
     const messageKeys = Object.keys(msg.message);
@@ -578,7 +654,7 @@ async function processAndSaveMessage(
     // NEVER eagerly download media for historical sync messages (their CDN tokens are expired and cause timeouts/disconnects)
     let fileUrl: string | null = null;
     const isLive = triggerWebhook;
-    const isRecent = Math.abs(Date.now() - timestamp.getTime()) < 60 * 1000;
+    const isRecent = Math.abs(Date.now() - timestamp.getTime()) < 12 * 60 * 60 * 1000;
 
     if (isLive && isRecent) {
         try {

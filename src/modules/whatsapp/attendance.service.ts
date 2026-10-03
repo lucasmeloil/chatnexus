@@ -639,4 +639,21 @@ export class AttendanceService {
             return false;
         }
     }
+
+    /**
+     * Delete attendant configuration.
+     */
+    static async deleteAttendantConfig(userId: string): Promise<boolean> {
+        await this.ensureTables();
+        try {
+            await prisma.$executeRawUnsafe(
+                `DELETE FROM \`AttendantConfig\` WHERE userId = ?`,
+                userId
+            );
+            return true;
+        } catch (e) {
+            logger.error("Attendance", `Error deleting attendant config for ${userId}`, e);
+            return false;
+        }
+    }
 }

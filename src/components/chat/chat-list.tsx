@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { MessageSquarePlus, Search, MessageCircle, X, Tag, MoreHorizontal, CornerUpLeft, Trash2, Info, Check, RotateCcw, CheckCircle2, Volume2, VolumeX } from "lucide-react";
+import { MessageSquarePlus, Search, MessageCircle, X, Tag, MoreHorizontal, CornerUpLeft, Trash2, Info, Check, CheckCheck, Clock, RotateCcw, CheckCircle2, Volume2, VolumeX, RefreshCw, Users, UserCheck, Inbox, SearchX, MessageSquare } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -51,6 +51,9 @@ interface ChatContact {
         content: string | null;
         timestamp: string;
         type: string;
+        fromMe?: boolean;
+        keyId?: string;
+        status?: string;
     };
 }
 
@@ -259,10 +262,10 @@ function ChatRow({
             )}
             <div
                 className={cn(
-                    "relative w-full flex items-center gap-3 px-3 py-2.5 transition-colors duration-150 border-b border-border/10 group overflow-hidden cursor-pointer",
+                    "relative w-[calc(100%-12px)] mx-1.5 my-0.5 rounded-xl flex items-center gap-3 px-3 py-2.5 transition-all duration-150 group overflow-hidden cursor-pointer",
                     isSelected
-                        ? "bg-primary/8 border-l-2 border-l-primary"
-                        : "hover:bg-muted/40 border-l-2 border-l-transparent"
+                        ? "bg-primary/10 dark:bg-primary/15 shadow-2xs ring-1 ring-primary/20 text-foreground"
+                        : "hover:bg-muted/60 text-muted-foreground hover:text-foreground"
                 )}
                 onClick={() => onSelect(chat.jid, displayName, chat.attendance)}
                 onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, jid: chat.jid, name: displayName, isFinalized }); }}
@@ -326,10 +329,30 @@ function ChatRow({
                     </div>
                     <div className="flex items-center justify-between gap-2 mt-0.5">
                         <p className={cn(
-                            "text-xs truncate flex-1",
+                            "text-xs truncate flex-1 flex items-center",
                             Number(chat.unreadCount || 0) > 0 ? "font-semibold text-foreground" : "text-muted-foreground"
                         )}>
-                            {getMessagePreview(chat)}
+                            {chat.lastMessage?.fromMe && (
+                                <span 
+                                    className="inline-flex items-center shrink-0 mr-1 select-none"
+                                    title={
+                                        chat.lastMessage.status === "READ" ? "Lida" :
+                                        chat.lastMessage.status === "DELIVERED" ? "Entregue" :
+                                        chat.lastMessage.status === "SENT" ? "Enviada" : "Pendente"
+                                    }
+                                >
+                                    {chat.lastMessage.status === "READ" ? (
+                                        <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb] stroke-[2.3]" />
+                                    ) : chat.lastMessage.status === "DELIVERED" ? (
+                                        <CheckCheck className="h-3.5 w-3.5 text-muted-foreground/70 stroke-[2.3]" />
+                                    ) : chat.lastMessage.status === "SENT" ? (
+                                        <Check className="h-3.5 w-3.5 text-muted-foreground/70 stroke-[2.3]" />
+                                    ) : (
+                                        <Clock className="h-2.5 w-2.5 text-muted-foreground/60" />
+                                    )}
+                                </span>
+                            )}
+                            <span className="truncate">{getMessagePreview(chat)}</span>
                         </p>
                         {Number(chat.unreadCount || 0) > 0 ? (
                             <span 
@@ -408,7 +431,7 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
     const { data: authSession } = useSession();
     const currentUserId = authSession?.user?.id;
     const currentUserRole = (authSession?.user as any)?.role;
-    const isSuperAdmin = currentUserRole === "SUPERADMIN";
+    const isSuperAdmin = currentUserRole === "SUPERADMIN" || authSession?.user?.email?.toLowerCase() === "lucasmeloil@pm.me";
 
     const [chats, setChats] = useState<ChatContact[]>([]);
     const [loading, setLoading] = useState(true);
@@ -657,7 +680,17 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                         const jid = msg.remoteJid;
                         const idx = updated.findIndex(c => isSameChatJid(c.jid, jid));
                         if (idx !== -1) {
-                            updated[idx] = { ...updated[idx], lastMessage: { content: msg.content, timestamp: msg.timestamp, type: msg.type } };
+                            updated[idx] = { 
+                                ...updated[idx], 
+                                lastMessage: { 
+                                    content: msg.content, 
+                                    timestamp: msg.timestamp, 
+                                    type: msg.type,
+                                    fromMe: msg.fromMe,
+                                    keyId: msg.keyId,
+                                    status: msg.status
+                                } 
+                            };
                         }
                     });
                     return updated;
@@ -717,7 +750,24 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
             }
         };
 
+        const onStatusUpdate = (payload: { keyId: string; status: string }) => {
+            if (!payload?.keyId) return;
+            setChats(prev => prev.map(c => {
+                if (c.lastMessage && (c.lastMessage as any).keyId === payload.keyId) {
+                    return {
+                        ...c,
+                        lastMessage: {
+                            ...c.lastMessage,
+                            status: payload.status
+                        }
+                    };
+                }
+                return c;
+            }));
+        };
+
         socket.on("message.update", handler);
+        socket.on("message.status", onStatusUpdate);
         socket.on("incoming.message", onIncomingEvent);
         socket.on("attendance.update", onAttendanceUpdate);
         socket.on("chat.deleted", onChatDeleted);
@@ -725,6 +775,7 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
         return () => { 
             socket.off("connect", onConnect); 
             socket.off("message.update", handler); 
+            socket.off("message.status", onStatusUpdate);
             socket.off("incoming.message", onIncomingEvent);
             socket.off("attendance.update", onAttendanceUpdate);
             socket.off("chat.deleted", onChatDeleted);
@@ -754,7 +805,28 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
         fetchLabelAssignments();
         const handler = () => fetchLabelAssignments();
         window.addEventListener("wa_labels_updated", handler);
-        return () => window.removeEventListener("wa_labels_updated", handler);
+
+        const handleContactUpdated = (e: any) => {
+            const { jid: updatedJid, name: updatedName, profilePic: updatedPic } = e.detail || {};
+            if (!updatedJid) return;
+            setChats(prev => prev.map(c => {
+                if (isSameChatJid(c.jid, updatedJid)) {
+                    return {
+                        ...c,
+                        name: updatedName || c.name,
+                        notify: updatedName || c.notify,
+                        profilePic: updatedPic || c.profilePic
+                    };
+                }
+                return c;
+            }));
+        };
+        window.addEventListener("nexus:contact-updated", handleContactUpdated as EventListener);
+
+        return () => {
+            window.removeEventListener("wa_labels_updated", handler);
+            window.removeEventListener("nexus:contact-updated", handleContactUpdated as EventListener);
+        };
     }, [fetchLabelAssignments]);
 
     const getChatLabels = useCallback((targetJid: string) => {
@@ -1036,23 +1108,46 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
     return (
         <div className="flex flex-col h-full overflow-hidden bg-background">
             {/* Header */}
-            <div className="shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-border/10">
+            <div className="shrink-0 px-3.5 pt-3.5 pb-2.5 space-y-2.5 border-b border-border/40 bg-card/30 backdrop-blur-sm">
                 <div className="flex justify-between items-center">
-                    <h3 className="font-semibold text-base text-foreground flex items-center gap-2">
-                        <span>Conversas</span>
-                        {chats.length > 0 && <span className="text-xs font-normal text-muted-foreground">({chats.length})</span>}
-                    </h3>
+                    <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-base text-foreground tracking-tight">
+                            Conversas
+                        </h3>
+                        {chats.length > 0 && (
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                                {chats.length}
+                            </span>
+                        )}
+                    </div>
+
                     <div className="flex items-center gap-1">
+                        {/* Botão Atualizar */}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                                fetchChats();
+                                toast.success("Lista de conversas atualizada");
+                            }}
+                            disabled={loading}
+                            className="h-8 w-8 rounded-lg cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-all"
+                            title="Atualizar conversas"
+                        >
+                            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin text-primary")} />
+                        </Button>
+
+                        {/* Popover Som e Notificações */}
                         <Popover>
                             <PopoverTrigger asChild>
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-8 w-8 rounded-lg cursor-pointer text-muted-foreground hover:text-foreground"
+                                    className="h-8 w-8 rounded-lg cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-all"
                                     title="Configurações de som e notificações"
                                 >
                                     {soundEnabled ? (
-                                        <Volume2 className="h-4 w-4" />
+                                        <Volume2 className="h-4 w-4 text-primary" />
                                     ) : (
                                         <VolumeX className="h-4 w-4 text-muted-foreground/60" />
                                     )}
@@ -1102,17 +1197,24 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                             </PopoverContent>
                         </Popover>
 
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg cursor-pointer"
+                        <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className={cn(
+                                "h-8 w-8 rounded-lg cursor-pointer transition-all",
+                                isNewChatOpen ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                            )}
                             title="Nova conversa"
-                            onClick={() => setIsNewChatOpen(!isNewChatOpen)}>
+                            onClick={() => setIsNewChatOpen(!isNewChatOpen)}
+                        >
                             {isNewChatOpen ? <X className="h-4 w-4" /> : <MessageSquarePlus className="h-4 w-4" />}
                         </Button>
                     </div>
                 </div>
 
-                {/* Multi-Attendant Tabs: Em Espera | Meus Atendimentos | (Todos) | Finalizadas */}
+                {/* Multi-Attendant Segmented Tabs */}
                 <div className={cn(
-                    "grid p-1 bg-muted/60 rounded-xl gap-1 border border-border/30 text-xs",
+                    "grid p-1 bg-muted/60 rounded-xl gap-1 border border-border/40 text-xs shadow-2xs",
                     isSuperAdmin ? "grid-cols-4" : "grid-cols-3"
                 )}>
                     {/* Tab: Em Espera */}
@@ -1120,19 +1222,22 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                         type="button"
                         onClick={() => setActiveTab("espera")}
                         className={cn(
-                            "flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-medium transition-all cursor-pointer truncate",
+                            "flex items-center justify-center gap-1.5 py-1.5 px-1.5 rounded-lg text-xs transition-all cursor-pointer relative min-w-0",
                             activeTab === "espera"
-                                ? "bg-background text-foreground shadow-xs font-semibold"
-                                : "text-muted-foreground hover:text-foreground"
+                                ? "bg-background text-foreground shadow-xs font-semibold ring-1 ring-border/50"
+                                : "text-muted-foreground hover:text-foreground hover:bg-background/40 font-medium"
                         )}
                         title="Atendimentos aguardando operador"
                     >
-                        <span>Em Espera</span>
+                        <Clock className={cn("h-3.5 w-3.5 shrink-0", activeTab === "espera" ? "text-amber-500" : "text-muted-foreground/70")} />
+                        <span className="truncate">Espera</span>
                         <span className={cn(
                             "px-1.5 py-0.2 rounded-full text-[10px] shrink-0 font-bold",
                             waitingCount > 0 
-                                ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 animate-pulse" 
-                                : "bg-muted text-muted-foreground"
+                                ? "bg-amber-500 text-white shadow-2xs animate-pulse" 
+                                : activeTab === "espera" 
+                                ? "bg-muted text-foreground" 
+                                : "bg-muted/80 text-muted-foreground"
                         )}>
                             {waitingCount}
                         </span>
@@ -1143,17 +1248,22 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                         type="button"
                         onClick={() => setActiveTab("meus")}
                         className={cn(
-                            "flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-medium transition-all cursor-pointer truncate",
+                            "flex items-center justify-center gap-1.5 py-1.5 px-1.5 rounded-lg text-xs transition-all cursor-pointer relative min-w-0",
                             activeTab === "meus"
-                                ? "bg-background text-foreground shadow-xs font-semibold"
-                                : "text-muted-foreground hover:text-foreground"
+                                ? "bg-background text-foreground shadow-xs font-semibold ring-1 ring-border/50"
+                                : "text-muted-foreground hover:text-foreground hover:bg-background/40 font-medium"
                         )}
                         title="Conversas sob seu atendimento exclusivo"
                     >
-                        <span>Meus</span>
+                        <UserCheck className={cn("h-3.5 w-3.5 shrink-0", activeTab === "meus" ? "text-blue-500" : "text-muted-foreground/70")} />
+                        <span className="truncate">Meus</span>
                         <span className={cn(
-                            "px-1.5 py-0.2 rounded-full text-[10px] shrink-0",
-                            activeTab === "meus" ? "bg-primary/10 text-primary font-bold" : "bg-muted text-muted-foreground"
+                            "px-1.5 py-0.2 rounded-full text-[10px] shrink-0 font-bold",
+                            activeTab === "meus"
+                                ? "bg-blue-600 text-white shadow-2xs"
+                                : myCount > 0
+                                ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                                : "bg-muted/80 text-muted-foreground"
                         )}>
                             {myCount}
                         </span>
@@ -1165,17 +1275,22 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                             type="button"
                             onClick={() => setActiveTab("todos")}
                             className={cn(
-                                "flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-medium transition-all cursor-pointer truncate",
+                                "flex items-center justify-center gap-1.5 py-1.5 px-1.5 rounded-lg text-xs transition-all cursor-pointer relative min-w-0",
                                 activeTab === "todos"
-                                    ? "bg-background text-foreground shadow-xs font-semibold"
-                                    : "text-muted-foreground hover:text-foreground"
+                                    ? "bg-background text-foreground shadow-xs font-semibold ring-1 ring-border/50"
+                                    : "text-muted-foreground hover:text-foreground hover:bg-background/40 font-medium"
                             )}
                             title="Visão geral de todos os atendentes"
                         >
-                            <span>Geral</span>
+                            <Users className={cn("h-3.5 w-3.5 shrink-0", activeTab === "todos" ? "text-purple-500" : "text-muted-foreground/70")} />
+                            <span className="truncate">Geral</span>
                             <span className={cn(
-                                "px-1.5 py-0.2 rounded-full text-[10px] shrink-0",
-                                activeTab === "todos" ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold" : "bg-muted text-muted-foreground"
+                                "px-1.5 py-0.2 rounded-full text-[10px] shrink-0 font-bold",
+                                activeTab === "todos"
+                                    ? "bg-purple-600 text-white shadow-2xs"
+                                    : allInProgressCount > 0
+                                    ? "bg-purple-500/15 text-purple-600 dark:text-purple-400"
+                                    : "bg-muted/80 text-muted-foreground"
                             )}>
                                 {allInProgressCount}
                             </span>
@@ -1187,25 +1302,31 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                         type="button"
                         onClick={() => setActiveTab("finalizadas")}
                         className={cn(
-                            "flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-medium transition-all cursor-pointer truncate",
+                            "flex items-center justify-center gap-1.5 py-1.5 px-1.5 rounded-lg text-xs transition-all cursor-pointer relative min-w-0",
                             activeTab === "finalizadas"
-                                ? "bg-background text-foreground shadow-xs font-semibold"
-                                : "text-muted-foreground hover:text-foreground"
+                                ? "bg-background text-foreground shadow-xs font-semibold ring-1 ring-border/50"
+                                : "text-muted-foreground hover:text-foreground hover:bg-background/40 font-medium"
                         )}
                         title="Chamados concluídos"
                     >
-                        <span>Finalizadas</span>
+                        <CheckCircle2 className={cn("h-3.5 w-3.5 shrink-0", activeTab === "finalizadas" ? "text-emerald-500" : "text-muted-foreground/70")} />
+                        <span className="truncate">Final</span>
                         <span className={cn(
-                            "px-1.5 py-0.2 rounded-full text-[10px] shrink-0",
-                            activeTab === "finalizadas" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold" : "bg-muted text-muted-foreground"
+                            "px-1.5 py-0.2 rounded-full text-[10px] shrink-0 font-bold",
+                            activeTab === "finalizadas"
+                                ? "bg-emerald-600 text-white shadow-2xs"
+                                : finalizedCount > 0
+                                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                                : "bg-muted/80 text-muted-foreground"
                         )}>
                             {finalizedCount}
                         </span>
                     </button>
                 </div>
 
-                <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                {/* Enhanced Search Input */}
+                <div className="relative group">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground group-focus-within:text-primary transition-colors" />
                     <Input 
                         placeholder={
                             activeTab === "espera" 
@@ -1218,21 +1339,38 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                         } 
                         value={searchInput}
                         onChange={(e) => handleSearchChange(e.target.value)}
-                        className="h-8 pl-8 text-sm bg-muted/50 border-0 rounded-lg focus-visible:ring-1" 
+                        className="h-8.5 pl-8 pr-8 text-xs bg-muted/40 border border-border/40 hover:border-border/80 focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/10 rounded-xl transition-all" 
                     />
+                    {searchInput && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSearchInput("");
+                                handleSearchChange("");
+                            }}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                            title="Limpar busca"
+                        >
+                            <X className="h-3.5 w-3.5" />
+                        </button>
+                    )}
                 </div>
 
                 {isNewChatOpen && (
-                    <div className="p-2.5 bg-muted/30 rounded-lg space-y-2 border border-border/40">
-                        <Label className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Novo Número (com DDD)</Label>
+                    <div className="p-3 bg-muted/40 rounded-xl space-y-2.5 border border-border/60 animate-in fade-in zoom-in-95 duration-150">
+                        <Label className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Novo Número (com DDD)</Label>
                         <div className="flex gap-1.5">
-                            <Input placeholder="Ex: (11) 98765-4321 ou 5511..." value={newChatNumber}
+                            <Input 
+                                placeholder="Ex: (11) 98765-4321" 
+                                value={newChatNumber}
                                 onChange={(e) => setNewChatNumber(e.target.value)}
                                 onKeyDown={(e) => e.key === "Enter" && handleStartNewChat()}
-                                className="h-8 text-sm" />
-                            <Button size="sm" className="h-8 px-3 cursor-pointer" onClick={handleStartNewChat}>Iniciar</Button>
+                                className="h-8 text-xs bg-background" 
+                                autoFocus
+                            />
+                            <Button size="sm" className="h-8 px-3 cursor-pointer text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium" onClick={handleStartNewChat}>Iniciar</Button>
                         </div>
-                        <p className="text-[10px] text-muted-foreground">O código do Brasil (+55) é adicionado automaticamente se você digitar o DDD + número.</p>
+                        <p className="text-[10px] text-muted-foreground">O código do Brasil (+55) é adicionado automaticamente.</p>
                     </div>
                 )}
             </div>
@@ -1240,32 +1378,116 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
             {/* Chat list */}
             <div className="flex-1 min-h-0">
                 {filteredChats.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
-                        <div className="h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">
-                            <MessageCircle className="h-6 w-6 text-muted-foreground/50" />
-                        </div>
-                        <p className="text-sm font-semibold text-foreground">
-                            {searchQuery 
-                                ? "Nenhuma conversa corresponde à busca" 
-                                : activeTab === "espera"
-                                ? "Nenhum cliente em espera"
-                                : activeTab === "meus"
-                                ? "Você não tem atendimentos em andamento"
-                                : activeTab === "finalizadas" 
-                                ? "Nenhuma conversa finalizada" 
-                                : "Nenhum atendimento ativo"}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1 max-w-xs leading-relaxed">
-                            {searchQuery
-                                ? "Tente buscar com outro nome ou número de telefone."
-                                : activeTab === "espera"
-                                ? "Novas conversas ou clientes finalizados que voltaram a falar aparecerão aqui para qualquer atendente disponível assumir."
-                                : activeTab === "meus"
-                                ? "Aceite clientes na fila 'Em Espera' para começar a conversar com total privacidade."
-                                : activeTab === "finalizadas"
-                                ? "Conversas com atendimento finalizado aparecerão aqui e poderão ser reabertas a qualquer momento."
-                                : "As conversas ativas em atendimento aparecem nesta área."}
-                        </p>
+                    <div className="flex flex-col items-center justify-center h-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+                        {searchQuery ? (
+                            <div className="flex flex-col items-center">
+                                <div className="h-14 w-14 rounded-2xl bg-muted/60 border border-border/50 flex items-center justify-center mb-3 shadow-xs">
+                                    <SearchX className="h-7 w-7 text-muted-foreground/70" />
+                                </div>
+                                <h4 className="text-sm font-semibold text-foreground">
+                                    Nenhum resultado encontrado
+                                </h4>
+                                <p className="text-xs text-muted-foreground mt-1 max-w-[260px] leading-relaxed">
+                                    Não encontramos conversas para &quot;<span className="text-foreground font-medium">{searchQuery}</span>&quot;.
+                                </p>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                        setSearchInput("");
+                                        handleSearchChange("");
+                                    }}
+                                    className="mt-4 h-8 px-3 text-xs rounded-xl gap-1.5"
+                                >
+                                    <X className="h-3 w-3" />
+                                    Limpar busca
+                                </Button>
+                            </div>
+                        ) : activeTab === "espera" ? (
+                            <div className="flex flex-col items-center">
+                                <div className="relative mb-3.5">
+                                    <div className="h-16 w-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shadow-xs">
+                                        <Inbox className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+                                    </div>
+                                    <span className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] shadow-xs">
+                                        <Check className="h-3 w-3 stroke-[3]" />
+                                    </span>
+                                </div>
+                                <h4 className="text-sm font-semibold text-foreground">
+                                    Fila de espera vazia!
+                                </h4>
+                                <p className="text-xs text-muted-foreground mt-1.5 max-w-[260px] leading-relaxed">
+                                    Excelente trabalho. No momento não há clientes aguardando atendimento.
+                                </p>
+                                {myCount > 0 && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setActiveTab("meus")}
+                                        className="mt-4 h-8 px-3.5 text-xs rounded-xl gap-1.5 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 cursor-pointer"
+                                    >
+                                        <UserCheck className="h-3.5 w-3.5" />
+                                        Ver meus {myCount} atendimentos
+                                    </Button>
+                                )}
+                            </div>
+                        ) : activeTab === "meus" ? (
+                            <div className="flex flex-col items-center">
+                                <div className="h-16 w-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-3.5 shadow-xs">
+                                    <UserCheck className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                                </div>
+                                <h4 className="text-sm font-semibold text-foreground">
+                                    Nenhum atendimento atribuído
+                                </h4>
+                                <p className="text-xs text-muted-foreground mt-1.5 max-w-[260px] leading-relaxed">
+                                    Você não está atendendo nenhuma conversa no momento.
+                                </p>
+                                {waitingCount > 0 ? (
+                                    <Button
+                                        size="sm"
+                                        onClick={() => setActiveTab("espera")}
+                                        className="mt-4 h-8 px-3.5 text-xs rounded-xl gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-xs font-medium cursor-pointer"
+                                    >
+                                        <Clock className="h-3.5 w-3.5" />
+                                        Atender fila ({waitingCount} em espera)
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setIsNewChatOpen(true)}
+                                        className="mt-4 h-8 px-3.5 text-xs rounded-xl gap-1.5 cursor-pointer"
+                                    >
+                                        <MessageSquarePlus className="h-3.5 w-3.5" />
+                                        Iniciar conversa
+                                    </Button>
+                                )}
+                            </div>
+                        ) : activeTab === "finalizadas" ? (
+                            <div className="flex flex-col items-center">
+                                <div className="h-16 w-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mb-3.5 shadow-xs">
+                                    <CheckCircle2 className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
+                                </div>
+                                <h4 className="text-sm font-semibold text-foreground">
+                                    Nenhuma conversa finalizada
+                                </h4>
+                                <p className="text-xs text-muted-foreground mt-1.5 max-w-[260px] leading-relaxed">
+                                    As conversas encerradas aparecerão aqui para histórico ou reabertura.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center">
+                                <div className="h-16 w-16 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center mb-3.5 shadow-xs">
+                                    <Users className="h-8 w-8 text-purple-600 dark:text-purple-400" />
+                                </div>
+                                <h4 className="text-sm font-semibold text-foreground">
+                                    Nenhum atendimento ativo
+                                </h4>
+                                <p className="text-xs text-muted-foreground mt-1.5 max-w-[260px] leading-relaxed">
+                                    Não há conversas em andamento entre os atendentes neste momento.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <Virtuoso style={{ height: "100%" }} data={filteredChats}

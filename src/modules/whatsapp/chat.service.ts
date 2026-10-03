@@ -5,6 +5,8 @@ import { onMessageSent } from "@/lib/webhook";
 import { AttendanceService } from "./attendance.service";
 import Sticker from "wa-sticker-formatter";
 import { convertToOggOpus } from "@/lib/audio-converter";
+import { writeFile, mkdir } from "fs/promises";
+import path from "path";
 
 export class ChatService {
     /**
@@ -30,8 +32,11 @@ export class ChatService {
             content: string | null;
             timestamp: Date;
             type: string;
+            fromMe: boolean | number;
+            keyId: string;
+            status: string;
         }>>(`
-            SELECT m1.remoteJid, m1.content, m1.timestamp, m1.type
+            SELECT m1.remoteJid, m1.content, m1.timestamp, m1.type, m1.fromMe, m1.keyId, m1.status
             FROM \`Message\` m1
             INNER JOIN (
                 SELECT remoteJid, MAX(timestamp) as max_ts
@@ -116,7 +121,10 @@ export class ChatService {
                         lastMessage: {
                             content: msg.content,
                             timestamp: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : String(msg.timestamp),
-                            type: msg.type
+                            type: msg.type,
+                            fromMe: Boolean(msg.fromMe),
+                            keyId: msg.keyId,
+                            status: msg.status
                         }
                     };
                 }
@@ -136,7 +144,10 @@ export class ChatService {
                     timestamp: msg.timestamp instanceof Date
                         ? msg.timestamp.toISOString()
                         : String(msg.timestamp),
-                    type: msg.type
+                    type: msg.type,
+                    fromMe: Boolean(msg.fromMe),
+                    keyId: msg.keyId,
+                    status: msg.status
                 }
             });
         }
@@ -602,6 +613,32 @@ export class ChatService {
         // Instant DB persistence and UI socket broadcast for media
         if (sendResult?.key?.id) {
             try {
+                // Save media locally so it is immediately viewable and clickable in UI
+                const extMap: Record<string, string> = {
+                    image: 'jpg',
+                    video: 'mp4',
+                    audio: 'mp3',
+                    voice: 'ogg',
+                    document: 'pdf',
+                    sticker: 'webp'
+                };
+                let ext = extMap[type] || 'bin';
+                if (fileName && fileName.includes('.')) {
+                    ext = fileName.split('.').pop()?.toLowerCase() || ext;
+                } else if (mimetype) {
+                    const sub = mimetype.split('/')[1]?.split(';')[0]?.toLowerCase();
+                    if (sub === 'jpeg') ext = 'jpg';
+                    else if (sub) ext = sub;
+                }
+
+                const filename = `${sessionId}-${sendResult.key.id}.${ext}`;
+                const mediaDir = path.join(process.cwd(), "data", "media");
+                await mkdir(mediaDir, { recursive: true });
+                const filePath = path.join(mediaDir, filename);
+                await writeFile(filePath, finalBuffer);
+
+                const fileUrl = `/api/media/${filename}`;
+
                 const dbSession = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
                 if (dbSession) {
                     const saved = await prisma.message.upsert({
@@ -618,10 +655,12 @@ export class ChatService {
                             keyId: sendResult.key.id,
                             type: (type === 'voice' ? 'AUDIO' : type.toUpperCase()) as any,
                             content: caption || fileName || "",
+                            mediaUrl: fileUrl,
                             status: "SENT",
                             timestamp: new Date()
                         },
                         update: {
+                            mediaUrl: fileUrl,
                             status: "SENT"
                         }
                     });
@@ -630,12 +669,13 @@ export class ChatService {
                     if (globalIo) {
                         globalIo.to(sessionId).emit("message.update", [{
                             ...saved,
+                            mediaUrl: fileUrl,
                             timestamp: saved.timestamp.toISOString()
                         }]);
                     }
                 }
             } catch (err) {
-                // Non-blocking
+                console.error("[ChatService] Error saving sent media:", err);
             }
         }
 

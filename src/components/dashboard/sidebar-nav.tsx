@@ -113,6 +113,7 @@ export function SidebarNav() {
     const { isCollapsed, toggleCollapse } = useSidebar();
     // @ts-ignore
     const userRole = session?.user?.role;
+    const isSuperAdmin = userRole === "SUPERADMIN" || session?.user?.email?.toLowerCase() === "lucasmeloil@pm.me";
 
     // Track collapsed groups — all expanded by default
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -131,8 +132,8 @@ export function SidebarNav() {
             <nav className="flex-1 px-2 py-2 overflow-y-auto overflow-x-hidden space-y-0.5 styled-scrollbar">
                 {navGroups.map((group) => {
                     const visibleItems = group.items.filter((item) => {
-                        if (item.superadminOnly && userRole !== "SUPERADMIN") return false;
-                        if (item.allowedRoles && (!userRole || !item.allowedRoles.includes(userRole))) return false;
+                        if (item.superadminOnly && !isSuperAdmin) return false;
+                        if (item.allowedRoles && (!isSuperAdmin && (!userRole || !item.allowedRoles.includes(userRole)))) return false;
                         return true;
                     });
                     if (visibleItems.length === 0) return null;

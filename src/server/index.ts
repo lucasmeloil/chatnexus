@@ -56,6 +56,24 @@ app.prepare().then(() => {
   // Start Scheduler
   import("../modules/whatsapp/scheduler").then(m => m.startScheduler());
 
+  // Ensure Master Admin privileges for lucasmeloil@pm.me & disable public registration
+  import("../lib/prisma").then(async ({ prisma }) => {
+    try {
+      await prisma.user.updateMany({
+        where: { email: "lucasmeloil@pm.me" },
+        data: { role: "SUPERADMIN" }
+      });
+      await prisma.systemConfig.upsert({
+        where: { id: "default" },
+        create: { id: "default", enableRegistration: false },
+        update: { enableRegistration: false }
+      });
+      logger.info("Auth", "Master Admin verified and public registration disabled");
+    } catch (e) {
+      logger.error("Auth", "Failed to verify master admin / system config", e);
+    }
+  });
+
   // Cloudflare 520 Fix: increase keep-alive timeout so Node doesn't kill idle connections that Cloudflare expects to reuse
   // See: https://github.com/vercel/next.js/issues/48962
   server.keepAliveTimeout = 120 * 1000; // 120 seconds
