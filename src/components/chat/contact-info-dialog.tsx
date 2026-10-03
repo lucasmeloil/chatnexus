@@ -423,7 +423,9 @@ export function ContactInfoDialog({
                                 <div className="flex items-center justify-between gap-2">
                                     <div className="flex items-center gap-2 min-w-0">
                                         <h2 className="text-xl font-bold text-foreground tracking-tight truncate">{currentName}</h2>
-                                        <ShieldCheck className="h-4 w-4 text-emerald-500 shrink-0" title="Contato WhatsApp Válido" />
+                                        <span title="Contato WhatsApp Válido">
+                                            <ShieldCheck className="h-4 w-4 text-emerald-500 shrink-0" />
+                                        </span>
                                     </div>
                                     <Button
                                         variant="ghost"

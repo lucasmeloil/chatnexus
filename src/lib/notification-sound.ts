@@ -204,62 +204,195 @@ export function setActiveOpenChatJid(jid: string | null): void {
     window.dispatchEvent(new CustomEvent("nexus:active-chat-changed", { detail: { jid: jid || null } }));
 }
 
-/**
- * Plays a notification sound chime using both HTMLAudioElement and Web Audio API fallback
- */
-export function playNotificationSound(): void {
-    if (!isNotificationSoundEnabled()) return;
+export type NotificationSoundType = 
+    | "nexus-chime" 
+    | "crystal" 
+    | "modern-pop" 
+    | "marimba" 
+    | "bell" 
+    | "cyber-alert"
+    | "custom";
+
+export interface NotificationSoundConfig {
+    type: NotificationSoundType;
+    volume: number; // 0 to 100
+    customAudioData?: string | null;
+    customAudioName?: string | null;
+}
+
+export function getNotificationSoundConfig(): NotificationSoundConfig {
+    if (typeof window === "undefined") {
+        return { type: "nexus-chime", volume: 80 };
+    }
+    const type = (localStorage.getItem("nexus_sound_type") as NotificationSoundType) || "nexus-chime";
+    const volStr = localStorage.getItem("nexus_sound_volume");
+    const volume = volStr !== null ? Math.max(0, Math.min(100, parseInt(volStr, 10) || 80)) : 80;
+    const customAudioData = localStorage.getItem("nexus_sound_custom_data") || null;
+    const customAudioName = localStorage.getItem("nexus_sound_custom_name") || null;
+
+    return { type, volume, customAudioData, customAudioName };
+}
+
+export function saveNotificationSoundConfig(config: {
+    type: NotificationSoundType;
+    volume: number;
+    customAudioData?: string | null;
+    customAudioName?: string | null;
+}): void {
     if (typeof window === "undefined") return;
-
-    let played = false;
-
-    // Method 1: HTMLAudioElement with synthesized Blob WAV
-    try {
-        const url = getChimeBlobUrl();
-        if (url) {
-            const audio = new Audio(url);
-            audio.volume = 0.85;
-            const playPromise = audio.play();
-            if (playPromise !== undefined) {
-                playPromise.then(() => {
-                    played = true;
-                }).catch((err) => {
-                    console.debug("HTMLAudio play was blocked, trying Web Audio API", err);
-                });
-            }
+    localStorage.setItem("nexus_sound_type", config.type);
+    localStorage.setItem("nexus_sound_volume", String(config.volume));
+    if (config.customAudioData !== undefined) {
+        if (config.customAudioData) {
+            localStorage.setItem("nexus_sound_custom_data", config.customAudioData);
+        } else {
+            localStorage.removeItem("nexus_sound_custom_data");
         }
-    } catch (e) {
-        console.debug("HTMLAudio playback exception", e);
+    }
+    if (config.customAudioName !== undefined) {
+        if (config.customAudioName) {
+            localStorage.setItem("nexus_sound_custom_name", config.customAudioName);
+        } else {
+            localStorage.removeItem("nexus_sound_custom_name");
+        }
     }
 
-    // Method 2: Web Audio API Oscillator Chime (concurrent or fallback)
+    window.dispatchEvent(new CustomEvent("nexus:sound-setting-changed", { detail: config }));
+}
+
+/**
+ * Preview or play a specific notification sound preset or custom audio
+ */
+export function previewNotificationSound(
+    soundType: NotificationSoundType = "nexus-chime",
+    volumePercent: number = 80,
+    customAudio?: string | null
+): void {
+    if (typeof window === "undefined") return;
+
+    const normalizedVol = Math.max(0.01, Math.min(1, volumePercent / 100));
+
+    // Custom audio playback
+    if (soundType === "custom") {
+        const audioSrc = customAudio || localStorage.getItem("nexus_sound_custom_data");
+        if (audioSrc) {
+            try {
+                const audio = new Audio(audioSrc);
+                audio.volume = normalizedVol;
+                audio.play().catch(err => {
+                    console.debug("Custom audio play blocked, falling back to Web Audio", err);
+                    playSynthesizedSound("nexus-chime", normalizedVol);
+                });
+                return;
+            } catch (e) {
+                console.debug("Custom audio failed", e);
+            }
+        }
+    }
+
+    playSynthesizedSound(soundType, normalizedVol);
+}
+
+function playSynthesizedSound(preset: NotificationSoundType, vol: number): void {
     try {
         const ctx = getAudioContext();
-        if (ctx) {
-            if (ctx.state === "suspended") {
-                ctx.resume().catch(() => {});
-            }
+        if (!ctx) return;
+        if (ctx.state === "suspended") {
+            ctx.resume().catch(() => {});
+        }
 
-            const now = ctx.currentTime;
+        const now = ctx.currentTime;
+
+        if (preset === "crystal") {
+            const notes = [659.25, 830.61, 987.77];
+            notes.forEach((freq, idx) => {
+                const start = now + idx * 0.065;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(freq, start);
+                gain.gain.setValueAtTime(0.28 * vol, start);
+                gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.45);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(start);
+                osc.stop(start + 0.45);
+            });
+        } else if (preset === "modern-pop") {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(850, now);
+            osc.frequency.exponentialRampToValueAtTime(420, now + 0.12);
+            gain.gain.setValueAtTime(0.38 * vol, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.14);
+        } else if (preset === "marimba") {
+            [440, 659.25].forEach((freq, idx) => {
+                const start = now + idx * 0.08;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = "triangle";
+                osc.frequency.setValueAtTime(freq, start);
+                gain.gain.setValueAtTime(0.42 * vol, start);
+                gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(start);
+                osc.stop(start + 0.28);
+            });
+        } else if (preset === "bell") {
+            const osc1 = ctx.createOscillator();
+            const osc2 = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc1.type = "sine";
+            osc2.type = "sine";
+            osc1.frequency.setValueAtTime(1046.5, now);
+            osc2.frequency.setValueAtTime(2093, now);
+            gain.gain.setValueAtTime(0.32 * vol, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.65);
+            osc1.connect(gain);
+            osc2.connect(gain);
+            gain.connect(ctx.destination);
+            osc1.start(now);
+            osc2.start(now);
+            osc1.stop(now + 0.65);
+            osc2.stop(now + 0.65);
+        } else if (preset === "cyber-alert") {
+            [880, 1174.66].forEach((freq, idx) => {
+                const start = now + idx * 0.09;
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(freq, start);
+                gain.gain.setValueAtTime(0.32 * vol, start);
+                gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start(start);
+                osc.stop(start + 0.22);
+            });
+        } else {
+            // nexus-chime (default)
             const osc1 = ctx.createOscillator();
             const osc2 = ctx.createOscillator();
             const gain1 = ctx.createGain();
             const gain2 = ctx.createGain();
-
-            // Note 1: 587.33 Hz (D5)
             osc1.type = "sine";
             osc1.frequency.setValueAtTime(587.33, now);
-            gain1.gain.setValueAtTime(0.28, now);
+            gain1.gain.setValueAtTime(0.28 * vol, now);
             gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
             osc1.connect(gain1);
             gain1.connect(ctx.destination);
             osc1.start(now);
             osc1.stop(now + 0.35);
 
-            // Note 2: 880 Hz (A5)
             osc2.type = "sine";
             osc2.frequency.setValueAtTime(880, now + 0.11);
-            gain2.gain.setValueAtTime(0.32, now + 0.11);
+            gain2.gain.setValueAtTime(0.32 * vol, now + 0.11);
             gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.48);
             osc2.connect(gain2);
             gain2.connect(ctx.destination);
@@ -267,9 +400,21 @@ export function playNotificationSound(): void {
             osc2.stop(now + 0.48);
         }
     } catch (e) {
-        console.debug("Web Audio API oscillator failed", e);
+        console.debug("Web Audio API oscillator playback failed", e);
     }
 }
+
+/**
+ * Plays a notification sound chime using the user-configured sound preset and volume
+ */
+export function playNotificationSound(): void {
+    if (!isNotificationSoundEnabled()) return;
+    if (typeof window === "undefined") return;
+
+    const config = getNotificationSoundConfig();
+    previewNotificationSound(config.type, config.volume, config.customAudioData);
+}
+
 
 export async function requestNotificationPermission(): Promise<boolean> {
     if (typeof window === "undefined" || !("Notification" in window)) return false;
