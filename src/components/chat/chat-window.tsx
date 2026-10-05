@@ -32,6 +32,8 @@ import { useSocket } from "./socket-context";
 import { setActiveOpenChatJid, getActiveOpenChatJid } from "@/lib/notification-sound";
 import { isSameChatJid } from "@/lib/jid-utils";
 import { EmojiPicker } from "./emoji-picker";
+import { VoiceStudioDialog } from "./voice-studio-dialog";
+import { VoiceProfile, VOICE_PROFILES } from "@/lib/voice-profiles";
 
 interface Message {
     id: string;
@@ -297,10 +299,23 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
     const [isRecording, setIsRecording] = useState<boolean>(false);
     const [recordingDuration, setRecordingDuration] = useState<number>(0);
     const [isSendingAudio, setIsSendingAudio] = useState<boolean>(false);
+    const [voiceProfile, setVoiceProfile] = useState<VoiceProfile>("broadcast");
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
     const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
+
+    // Load saved SteelSeries Sonar voice profile from localStorage
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem("nexus_voice_profile") as VoiceProfile;
+            if (saved && ["broadcast", "clarity", "warm", "denoise", "natural"].includes(saved)) {
+                setVoiceProfile(saved);
+            }
+        } catch (e) {
+            // ignore
+        }
+    }, []);
 
     // Cancel recording if switching chats or unmounting
     useEffect(() => {
@@ -1060,7 +1075,22 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                 return;
             }
 
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // Request studio-quality microphone capture with active hardware/browser noise suppression
+            let stream: MediaStream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        channelCount: 1,
+                        sampleRate: 48000
+                    }
+                });
+            } catch {
+                // Fallback to basic audio stream if specific constraints are not accepted by the device
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            }
             mediaStreamRef.current = stream;
 
             // Pick supported mime type for highest compatibility with WhatsApp
@@ -1159,6 +1189,7 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                 formData.append("type", "voice");
                 formData.append("sessionId", sessionId);
                 formData.append("jid", jid);
+                formData.append("voiceProfile", voiceProfile);
 
                 toast.info("Enviando áudio...");
                 const res = await fetch(`/api/messages/${sessionId}/${encodeURIComponent(jid)}/media`, {
@@ -2300,6 +2331,9 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                     <span className="text-xs text-muted-foreground hidden md:inline truncate">
                                         Gravando mensagem de voz...
                                     </span>
+                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20 hidden lg:inline-flex items-center gap-1">
+                                        Filtro: {VOICE_PROFILES[voiceProfile]?.name || "Estúdio"}
+                                    </span>
                                 </div>
 
                                 <div className="flex items-center gap-1.5 shrink-0">
@@ -2415,15 +2449,21 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                         <Send className="h-4 w-4" />
                                     </Button>
                                 ) : (
-                                    <Button
-                                        type="button"
-                                        onClick={startRecording}
-                                        size="icon"
-                                        className="h-9 w-9 rounded-full shrink-0 bg-blue-600 hover:bg-blue-700 text-white shadow-md cursor-pointer transition-all hover:scale-105"
-                                        title="Gravar áudio (Mensagem de Voz)"
-                                    >
-                                        <Mic className="h-4.5 w-4.5" />
-                                    </Button>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <VoiceStudioDialog
+                                            currentProfile={voiceProfile}
+                                            onSelectProfile={(p) => setVoiceProfile(p)}
+                                        />
+                                        <Button
+                                            type="button"
+                                            onClick={startRecording}
+                                            size="icon"
+                                            className="h-9 w-9 rounded-full shrink-0 bg-blue-600 hover:bg-blue-700 text-white shadow-md cursor-pointer transition-all hover:scale-105"
+                                            title={`Gravar áudio (${VOICE_PROFILES[voiceProfile]?.name || "Estúdio"})`}
+                                        >
+                                            <Mic className="h-4.5 w-4.5" />
+                                        </Button>
+                                    </div>
                                 )}
                             </>
                         )}

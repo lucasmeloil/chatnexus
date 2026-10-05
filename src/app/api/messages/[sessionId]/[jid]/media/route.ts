@@ -2,6 +2,7 @@ import { NextResponse, NextRequest } from "next/server";
 import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
 import { ChatService } from "@/modules/whatsapp/chat.service";
 import { waManager } from "@/modules/whatsapp/manager";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = 'force-dynamic';
 
@@ -24,12 +25,49 @@ export async function POST(
             return NextResponse.json({ status: false, message: "Acesso negado a esta sessão", error: "Forbidden - Cannot access this session" }, { status: 403 });
         }
 
-        // Validate instance connection status
-        const instance = waManager.getInstance(sessionId);
-        if (!instance || !instance.socket) {
+        // Resolve database session to get the actual Baileys sessionId (handles cuid vs sessionId)
+        const dbSession = await prisma.session.findFirst({
+            where: {
+                OR: [
+                    { id: sessionId },
+                    { sessionId: sessionId }
+                ]
+            }
+        });
+
+        if (!dbSession) {
             return NextResponse.json({ 
                 status: false, 
-                message: "A sessão do WhatsApp está desconectada. Verifique o status da conexão em Sessões.", 
+                message: "Sessão não encontrada.", 
+                error: "Session not found" 
+            }, { status: 404 });
+        }
+
+        const actualSessionId = dbSession.sessionId;
+
+        // Validate instance connection status
+        let instance = waManager.getInstance(actualSessionId) || waManager.getInstance(sessionId);
+
+        // Auto-recovery: if instance not active in memory but credentials exist in DB and not stopped
+        if (!instance || !instance.socket) {
+            const authCount = await prisma.authState.count({
+                where: { sessionId: actualSessionId }
+            });
+            if (authCount > 0 && dbSession.status !== "STOPPED" && dbSession.status !== "LOGGED_OUT") {
+                try {
+                    await waManager.startSession(actualSessionId);
+                    instance = waManager.getInstance(actualSessionId);
+                } catch (err) {
+                    console.error("Auto-start session error in media route:", err);
+                }
+            }
+        }
+
+        if (!instance || !instance.socket) {
+            const statusDetail = dbSession.status === "CONNECTED" ? "reconectando" : (dbSession.status || "desconectada");
+            return NextResponse.json({ 
+                status: false, 
+                message: `A sessão do WhatsApp está desconectada (${statusDetail}). Verifique o status da conexão em Sessões.`, 
                 error: "Session disconnected" 
             }, { status: 400 });
         }
@@ -38,6 +76,7 @@ export async function POST(
         const file = formData.get("file") as File;
         const type = (formData.get("type") as string) || "document"; // image, video, audio, document
         const caption = formData.get("caption") as string || "";
+        const voiceProfile = (formData.get("voiceProfile") as any) || "broadcast";
         
         if (!file) {
              return NextResponse.json({ status: false, message: "Arquivo obrigatório", error: "file is required" }, { status: 400 });
@@ -56,15 +95,16 @@ export async function POST(
         }
         const buffer = Buffer.from(await file.arrayBuffer());
 
-        // Send via ChatService
+        // Send via ChatService with actual Baileys sessionId & voiceProfile
         const sent = await ChatService.sendMediaMessage(
-             sessionId, 
+             actualSessionId, 
              decodedJid, 
              buffer, 
              type, 
              file.type, 
              file.name, 
-             caption
+             caption,
+             voiceProfile
         );
 
         return NextResponse.json({ status: true, message: "Arquivo enviado com sucesso", data: sent });

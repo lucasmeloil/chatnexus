@@ -7,7 +7,7 @@ import os from "os";
 let cachedFfmpegPath: string | null = null;
 
 export function getFfmpegPath(): string | null {
-    if (cachedFfmpegPath && (cachedFfmpegPath === "ffmpeg" || fs.existsSync(cachedFfmpegPath))) {
+    if (cachedFfmpegPath && cachedFfmpegPath !== "ffmpeg" && fs.existsSync(cachedFfmpegPath)) {
         return cachedFfmpegPath;
     }
 
@@ -37,33 +37,28 @@ export function getFfmpegPath(): string | null {
         // Ignore
     }
 
-    // 3. Fallback to system command
+    // 3. Fallback relative to project root
+    const relPath = path.resolve(__dirname, "../../..", "node_modules", "ffmpeg-static", exeName);
+    if (fs.existsSync(relPath)) {
+        cachedFfmpegPath = relPath;
+        return cachedFfmpegPath;
+    }
+
     cachedFfmpegPath = "ffmpeg";
     return cachedFfmpegPath;
 }
 
-/**
- * Checks if buffer is already in OGG format (starts with 'OggS')
- */
-export function isOggBuffer(buffer: Buffer): boolean {
-    return (
-        buffer.length >= 4 &&
-        buffer[0] === 0x4f && // O
-        buffer[1] === 0x67 && // g
-        buffer[2] === 0x67 && // g
-        buffer[3] === 0x53    // S
-    );
-}
+export { type VoiceProfile, type VoiceProfileConfig, VOICE_PROFILES } from "./voice-profiles";
+import { type VoiceProfile, VOICE_PROFILES } from "./voice-profiles";
 
 /**
- * Converts any audio buffer (e.g. WebM Opus from browser, MP3, WAV, AAC)
- * to WhatsApp-compatible OGG Opus for voice notes (Push-to-Talk / PTT).
+ * Converts any audio buffer (WebM Opus from browser, MP3, WAV, AAC, raw Ogg)
+ * to WhatsApp-native PTT OGG Opus (Mono, 48kHz, VOIP profile) applying SteelSeries Sonar presets.
  */
-export async function convertToOggOpus(inputBuffer: Buffer): Promise<Buffer> {
-    if (isOggBuffer(inputBuffer)) {
-        return inputBuffer;
-    }
-
+export async function convertToOggOpus(
+    inputBuffer: Buffer,
+    profile: VoiceProfile = 'broadcast'
+): Promise<Buffer> {
     const ffmpegPath = getFfmpegPath();
     if (!ffmpegPath) {
         console.warn("[AudioConverter] ffmpeg not found, using original buffer");
@@ -75,6 +70,9 @@ export async function convertToOggOpus(inputBuffer: Buffer): Promise<Buffer> {
     const inputPath = path.join(tempDir, `${tempId}_in.tmp`);
     const outputPath = path.join(tempDir, `${tempId}_out.ogg`);
 
+    const activeProfile = VOICE_PROFILES[profile] || VOICE_PROFILES.broadcast;
+    const filterChain = activeProfile.filterChain;
+
     try {
         await fsp.writeFile(inputPath, inputBuffer);
 
@@ -83,10 +81,11 @@ export async function convertToOggOpus(inputBuffer: Buffer): Promise<Buffer> {
                 "-y",
                 "-i", inputPath,
                 "-vn",                  // No video
+                "-af", filterChain,     // SteelSeries Sonar vocal processing & noise reduction
                 "-c:a", "libopus",
                 "-ac", "1",             // Mono channel (required by WhatsApp PTT)
                 "-ar", "48000",         // 48kHz standard Opus sample rate
-                "-b:a", "48k",          // Voice note bitrate
+                "-b:a", "64k",          // Crystal clear 64kbps voice bitrate
                 "-vbr", "on",
                 "-application", "voip", // Optimized for voice notes
                 "-avoid_negative_ts", "make_zero",

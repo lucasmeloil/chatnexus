@@ -539,11 +539,22 @@ export class ChatService {
         type: string,
         mimetype: string,
         fileName: string,
-        caption: string
+        caption: string,
+        voiceProfile?: any
     ) {
-        const instance = waManager.getInstance(sessionId);
+        let instance = waManager.getInstance(sessionId);
+        if (!instance) {
+            const dbSession = await prisma.session.findFirst({
+                where: { OR: [{ id: sessionId }, { sessionId: sessionId }] },
+                select: { sessionId: true }
+            });
+            if (dbSession) {
+                instance = waManager.getInstance(dbSession.sessionId);
+                sessionId = dbSession.sessionId;
+            }
+        }
         if (!instance || !instance.socket) {
-            throw new Error("WhatsApp session is disconnected or not found");
+            throw new Error("A sessão do WhatsApp está desconectada. Verifique o status da conexão em Sessões.");
         }
         const targetJid = await ChatService.resolveSendingJid(instance.socket, jid);
 
@@ -562,8 +573,8 @@ export class ChatService {
         } else if (type === 'audio') {
             content = { audio: buffer, mimetype: mimetype || 'audio/mp4', ptt: false };
         } else if (type === 'voice') {
-            // Transcode voice note (WebM/WAV/MP3) to WhatsApp native Ogg Opus (PTT)
-            finalBuffer = await convertToOggOpus(buffer);
+            // Transcode voice note (WebM/WAV/MP3) to WhatsApp native Ogg Opus (PTT) with selected voiceProfile
+            finalBuffer = await convertToOggOpus(buffer, voiceProfile);
             finalMime = 'audio/ogg; codecs=opus';
             content = { audio: finalBuffer, mimetype: finalMime, ptt: true };
         } else if (type === 'document') {
