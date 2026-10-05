@@ -1858,13 +1858,42 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                             <div className="h-6 w-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                         </div>
                     )}
+                    {hasMore && (
+                        <div className="flex justify-center py-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    if (!loadingMore && oldestTimestamp) {
+                                        const prevHeight = scrollRef.current?.scrollHeight || 0;
+                                        fetchMessages(oldestTimestamp).then(() => {
+                                            requestAnimationFrame(() => {
+                                                if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight - prevHeight;
+                                            });
+                                        });
+                                    }
+                                }}
+                                disabled={loadingMore}
+                                className="text-xs h-7 gap-1.5 rounded-full bg-background/80 backdrop-blur-sm shadow-xs border-border/40 hover:bg-muted cursor-pointer"
+                            >
+                                {loadingMore ? (
+                                    <>
+                                        <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                                        <span>Carregando histórico...</span>
+                                    </>
+                                ) : (
+                                    <span>Carregar mensagens anteriores</span>
+                                )}
+                            </Button>
+                        </div>
+                    )}
                     {!hasMore && messages.length > 0 && (
                         <div className="text-center py-4">
-                            <span className="text-[10px] font-medium text-muted-foreground bg-background/80 px-3 py-1 rounded-full border border-border/30">Beginning of conversation</span>
+                            <span className="text-[10px] font-medium text-muted-foreground bg-background/80 px-3 py-1 rounded-full border border-border/30">Início da conversa</span>
                         </div>
                     )}
                     {messages.length === 0 && !loading && (
-                        <div className="flex-1 flex items-center justify-center py-16"><p className="text-sm text-muted-foreground">No messages yet</p></div>
+                        <div className="flex-1 flex items-center justify-center py-16"><p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p></div>
                     )}
                     {messages.map((msg, idx) => {
                         const showDate = idx === 0 || getDateLabel(msg.timestamp) !== getDateLabel(messages[idx - 1].timestamp);
