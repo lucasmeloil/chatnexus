@@ -27,25 +27,23 @@ export class WhatsAppManager {
     async loadSessions() {
         if (!this.io) throw new Error("Socket.IO not initialized in WhatsAppManager");
         const sessions = await prisma.session.findMany({
-            where: {
-                status: { not: "LOGGED_OUT" }
-            },
             select: { sessionId: true, userId: true, status: true }
         });
 
         let started = 0;
         for (const session of sessions) {
-            // Only auto-init sessions that were CONNECTED before (have auth creds)
+            // Check if credentials exist for this session
             const authCount = await prisma.authState.count({
                 where: { sessionId: session.sessionId }
             });
             if (authCount === 0) {
                 // No credentials — session was created but never connected
-                // Set to STOPPED so it doesn't spam reconnect
-                await prisma.session.update({
-                    where: { sessionId: session.sessionId },
-                    data: { status: "STOPPED" }
-                }).catch(() => {});
+                if (session.status !== "STOPPED") {
+                    await prisma.session.update({
+                        where: { sessionId: session.sessionId },
+                        data: { status: "STOPPED" }
+                    }).catch(() => {});
+                }
                 continue;
             }
 
@@ -119,7 +117,26 @@ export class WhatsAppManager {
             await instance.shutdown();
             this.sessions.delete(sessionId);
         }
-        await prisma.session.delete({ where: { sessionId } });
+        await prisma.$transaction([
+            prisma.authState.deleteMany({ where: { sessionId } }),
+            prisma.session.delete({ where: { sessionId } })
+        ]).catch(async () => {
+            await prisma.session.delete({ where: { sessionId } }).catch(() => {});
+        });
+    }
+
+    /** Gracefully shut down all running WhatsApp sessions (e.g. on server restart) */
+    async shutdownAll() {
+        logger.info("Manager", `Gracefully shutting down all (${this.sessions.size}) WhatsApp sessions...`);
+        for (const [id, instance] of this.sessions.entries()) {
+            try {
+                await instance.shutdown();
+            } catch (e) {
+                // ignore
+            }
+        }
+        this.sessions.clear();
+        logger.success("Manager", "All WhatsApp sessions shut down cleanly.");
     }
 
     async stopSession(sessionId: string) {

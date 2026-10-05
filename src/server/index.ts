@@ -118,4 +118,25 @@ app.prepare().then(() => {
     setInterval(sendHeartbeat, 30000);
     // --------------------------------
   });
+
+  // Graceful shutdown handling for clean Baileys socket closure on process restart/stop
+  const handleGracefulShutdown = async (signal: string) => {
+    logger.info("Server", `${signal} received. Closing all WhatsApp sessions gracefully...`);
+    try {
+      await waManager.shutdownAll();
+    } catch (e) {
+      logger.error("Server", "Error closing WhatsApp sessions:", e);
+    }
+    server.close(() => {
+      logger.info("Server", "HTTP server closed.");
+      process.exit(0);
+    });
+    // Fallback force exit if lingering handles remain
+    setTimeout(() => {
+      process.exit(0);
+    }, 4000);
+  };
+
+  process.on("SIGINT", () => handleGracefulShutdown("SIGINT"));
+  process.on("SIGTERM", () => handleGracefulShutdown("SIGTERM"));
 });

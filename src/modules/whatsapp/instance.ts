@@ -44,6 +44,19 @@ export class WhatsAppInstance {
 
     async init() {
         this.isStopped = false;
+
+        // Clean up previous socket if one exists to prevent ghost connections and listener leaks
+        if (this.socket) {
+            try {
+                this.socket.ev.removeAllListeners("connection.update");
+                this.socket.ev.removeAllListeners("creds.update");
+                this.socket.end(undefined);
+            } catch (e) {
+                // ignore
+            }
+            this.socket = null;
+        }
+
         const sessionData = await prisma.session.findUnique({
             where: { sessionId: this.sessionId },
             include: { botConfig: true }
@@ -146,27 +159,23 @@ export class WhatsAppInstance {
                 const isLoggedOut = code === DisconnectReason.loggedOut;
 
                 if (isLoggedOut) {
-                    // Logged out: stop permanently, remove from memory
-                    this.status = "LOGGED_OUT";
+                    // Do NOT purge credentials automatically!
+                    // A transient 401 often happens during server restarts, socket collisions, or temporary network drops.
+                    // Keep credentials so user or server can reconnect without re-scanning QR.
+                    this.status = "DISCONNECTED";
                     this.socket = null;
                     this.config = {};
-                    this.io?.to(this.sessionId).emit("connection.update", { status: "LOGGED_OUT", qr: null });
+                    this.io?.to(this.sessionId).emit("connection.update", { status: "DISCONNECTED", qr: null });
 
-                    logger.info("Instance", `Session ${this.sessionId} logged out. Deleting credentials...`);
+                    logger.warn("Instance", `Session ${this.sessionId} closed with code 401. Preserving credentials in database for safe reconnect.`);
                     try {
-                        await prisma.$transaction([
-                            prisma.session.update({
-                                where: { sessionId: this.sessionId },
-                                data: { status: "LOGGED_OUT", qr: null }
-                            }),
-                            prisma.authState.deleteMany({
-                                where: { sessionId: this.sessionId }
-                            })
-                        ]);
+                        await prisma.session.update({
+                            where: { sessionId: this.sessionId },
+                            data: { status: "DISCONNECTED", qr: null }
+                        });
                     } catch (e) { /* ignore */ }
-                    logger.success("Instance", `Session ${this.sessionId} credentials deleted.`);
 
-                    // Remove from memory manager
+                    // Remove dead socket from memory manager
                     this.onRemovedFromManager?.();
                     return;
                 }
@@ -215,25 +224,25 @@ export class WhatsAppInstance {
                     }).catch(() => {});
 
                     logger.warn("Instance",
-                        `Session ${this.sessionId} disconnected. Reconnecting (${this.reconnectCount}/${MAX_RECONNECT_ATTEMPTS})...`
+                        `Session ${this.sessionId} disconnected (code: ${code}). Reconnecting (${this.reconnectCount}/${MAX_RECONNECT_ATTEMPTS})...`
                     );
                     setTimeout(() => {
                         if (!this.isStopped) this.init();
                     }, 3000);
                 } else {
-                    // Max retries exceeded — auto-stop
-                    this.status = "STOPPED";
+                    // Max retries exceeded — stop auto-reconnecting loop, but keep credentials safe!
+                    this.status = "DISCONNECTED";
                     this.socket = null;
                     this.reconnectCount = 0;
-                    this.isStopped = true; // prevent further retries
-                    this.io?.to(this.sessionId).emit("connection.update", { status: "STOPPED", qr: null });
+                    this.isStopped = true; // prevent infinite auto-retry
+                    this.io?.to(this.sessionId).emit("connection.update", { status: "DISCONNECTED", qr: null });
 
                     await prisma.session.update({
                         where: { sessionId: this.sessionId },
-                        data: { status: "STOPPED", qr: null }
+                        data: { status: "DISCONNECTED", qr: null }
                     }).catch(() => {});
-                    logger.error("Instance",
-                        `Session ${this.sessionId} max reconnects (${MAX_RECONNECT_ATTEMPTS}) reached. Auto-stopped.`
+                    logger.warn("Instance",
+                        `Session ${this.sessionId} max reconnects (${MAX_RECONNECT_ATTEMPTS}) reached. Auto-stopped retry. Credentials preserved.`
                     );
 
                     // Remove from memory manager
@@ -307,8 +316,16 @@ export class WhatsAppInstance {
     /** Clean shutdown without triggering reconnect */
     async shutdown() {
         this.isStopped = true;
-        this.socket?.end(undefined);
-        this.socket = null;
+        if (this.socket) {
+            try {
+                this.socket.ev.removeAllListeners("connection.update");
+                this.socket.ev.removeAllListeners("creds.update");
+                this.socket.end(undefined);
+            } catch (e) {
+                // ignore
+            }
+            this.socket = null;
+        }
         this.reconnectCount = 0;
     }
 }
