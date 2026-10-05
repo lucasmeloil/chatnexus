@@ -1216,6 +1216,30 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
         recorder.stop();
     };
 
+    // Keyboard shortcut: Press Enter to send recorded audio, Escape to discard
+    useEffect(() => {
+        if (!isRecording) return;
+
+        const handleRecordingKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!isSendingAudio) {
+                    stopAndSendRecording();
+                }
+            } else if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!isSendingAudio) {
+                    cancelRecording();
+                }
+            }
+        };
+
+        window.addEventListener("keydown", handleRecordingKeyDown, true);
+        return () => window.removeEventListener("keydown", handleRecordingKeyDown, true);
+    }, [isRecording, isSendingAudio]);
+
     const formatDuration = (totalSeconds: number) => {
         const mins = Math.floor(totalSeconds / 60);
         const secs = totalSeconds % 60;
@@ -2344,7 +2368,7 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                         onClick={cancelRecording}
                                         disabled={isSendingAudio}
                                         className="h-8 px-2.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-500/20 gap-1 rounded-xl cursor-pointer"
-                                        title="Descartar gravação"
+                                        title="Descartar gravação (Esc)"
                                     >
                                         <Trash2 className="h-4 w-4" />
                                         <span className="hidden sm:inline">Descartar</span>
@@ -2355,7 +2379,7 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                         onClick={stopAndSendRecording}
                                         disabled={isSendingAudio}
                                         className="h-8 px-3.5 text-xs bg-blue-600 hover:bg-blue-700 text-white gap-1.5 rounded-xl shadow-md font-semibold cursor-pointer"
-                                        title="Enviar mensagem de voz"
+                                        title="Enviar mensagem de voz (ou pressione Enter)"
                                     >
                                         {isSendingAudio ? (
                                             <>
@@ -2366,6 +2390,7 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                             <>
                                                 <Send className="h-3.5 w-3.5" />
                                                 <span>Enviar Áudio</span>
+                                                <kbd className="hidden sm:inline-block ml-1 px-1.5 py-0.5 bg-white/20 rounded text-[10px] font-mono leading-none">Enter ↵</kbd>
                                             </>
                                         )}
                                     </Button>
