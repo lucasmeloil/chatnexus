@@ -25,6 +25,7 @@ function AvatarImage({
   className,
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Image>) {
+  if (!props.src) return null
   return (
     <AvatarPrimitive.Image
       data-slot="avatar-image"

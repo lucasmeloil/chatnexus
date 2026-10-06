@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Send, Paperclip, ArrowLeft, FileText, Image as ImageIcon, Music, Video, Download, ArrowDown, CornerUpLeft, Copy, Trash2, Info, X, UserCheck, Edit2, Mic, Square, Loader2, CheckCircle2, ArrowRightLeft, Zap, Tag, Sparkles, RotateCcw, Lock, Clock, ShieldAlert, Check, CheckCheck, Maximize2, ExternalLink, ZoomIn, ZoomOut, UserPlus } from "lucide-react";
+import { Send, Paperclip, ArrowLeft, FileText, Image as ImageIcon, Music, Video, Download, ArrowDown, CornerUpLeft, Copy, Trash2, Info, X, UserCheck, Edit2, Pencil, Mic, Square, Loader2, CheckCircle2, ArrowRightLeft, Zap, Tag, Sparkles, RotateCcw, Lock, Clock, ShieldAlert, Check, CheckCheck, Maximize2, ExternalLink, ZoomIn, ZoomOut, UserPlus, Ban, AlertTriangle } from "lucide-react";
 import { ContactInfoDialog, formatPhoneNumberDisplay } from "./contact-info-dialog";
 import { useSession } from "next-auth/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -47,6 +47,7 @@ interface Message {
     mediaUrl?: string;
     remoteJid?: string;
     quoteId?: string | null;
+    isDeleted?: boolean;
     quoted?: {
         keyId: string;
         content: string | null;
@@ -217,7 +218,7 @@ interface ContextMenuState {
     y: number;
     msg: Message;
 }
-function ContextMenu({ state, onClose, onReply, onDelete }: { state: ContextMenuState; onClose: () => void; onReply: (msg: Message) => void; onDelete: (msg: Message) => void }) {
+function ContextMenu({ state, onClose, onReply, onDelete, onEdit }: { state: ContextMenuState; onClose: () => void; onReply: (msg: Message) => void; onDelete: (msg: Message) => void; onEdit?: (msg: Message) => void }) {
     const ref = useRef<HTMLDivElement>(null);
     useEffect(() => {
         const handler = (e: MouseEvent) => {
@@ -229,6 +230,9 @@ function ContextMenu({ state, onClose, onReply, onDelete }: { state: ContextMenu
 
     const items = [
         { label: "Reply", icon: CornerUpLeft, action: () => { onReply(state.msg); onClose(); } },
+        ...(state.msg.fromMe && state.msg.type === 'TEXT' && !state.msg.isDeleted && onEdit ? [
+            { label: "Editar", icon: Pencil, action: () => { onEdit(state.msg); onClose(); } }
+        ] : []),
         { label: "Copy", icon: Copy, action: () => { navigator.clipboard.writeText(state.msg.content || "").then(() => toast.success("Copied!")).catch(() => { }); onClose(); } },
         { label: "Delete", icon: Trash2, action: () => { onDelete(state.msg); onClose(); }, dangerous: true },
         { label: "Info", icon: Info, action: () => { toast.info(`ID: ${state.msg.keyId}\nStatus: ${state.msg.status}\nTime: ${new Date(state.msg.timestamp).toLocaleString()}`); onClose(); } },
@@ -244,7 +248,7 @@ function ContextMenu({ state, onClose, onReply, onDelete }: { state: ContextMenu
             {items.map((item, i) => (
                 <button key={i} onClick={item.action} className={cn(
                     "w-full flex items-center gap-2.5 px-3 py-2 text-sm transition-colors cursor-pointer",
-                    item.dangerous ? "text-red-500 hover:bg-red-500/10" : "text-foreground hover:bg-muted"
+                    (item as any).dangerous ? "text-red-500 hover:bg-red-500/10" : "text-foreground hover:bg-muted"
                 )}>
                     <item.icon className="h-3.5 w-3.5 shrink-0" />
                     {item.label}
@@ -273,6 +277,11 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
 
     // Delete confirmation
     const [deleteConfirmMsg, setDeleteConfirmMsg] = useState<Message | null>(null);
+
+    // Edit message state
+    const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+    const [editText, setEditText] = useState<string>("");
+    const [isSubmittingEdit, setIsSubmittingEdit] = useState<boolean>(false);
 
     // Reply state
     const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -387,6 +396,9 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
             .then(data => {
                 if (active && data?.profilePicUrl) {
                     setHeaderProfilePic(data.profilePicUrl);
+                    window.dispatchEvent(new CustomEvent("nexus:contact-updated", {
+                        detail: { jid, profilePic: data.profilePicUrl }
+                    }));
                 }
             })
             .catch(() => {});
@@ -870,10 +882,29 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
         };
         socket.on("message.status", statusHandler);
 
+        // Real-time "deleted for everyone" flag (content/media preserved)
+        const deletedHandler = (payload: { keyId: string; remoteJid?: string }) => {
+            if (!payload?.keyId) return;
+            setMessages(prev => {
+                if (!prev.some(m => m.keyId === payload.keyId && !m.isDeleted)) return prev;
+                return prev.map(m => m.keyId === payload.keyId ? { ...m, isDeleted: true } : m);
+            });
+        };
+        socket.on("message.deleted", deletedHandler);
+
+        // Real-time "edited message" update (corrigir texto)
+        const editedHandler = (payload: { keyId: string; remoteJid?: string; newContent: string }) => {
+            if (!payload?.keyId || typeof payload.newContent !== "string") return;
+            setMessages(prev => prev.map(m => m.keyId === payload.keyId ? { ...m, content: payload.newContent } : m));
+        };
+        socket.on("message.edited", editedHandler);
+
         return () => { 
             socket.off("connect", onConnect); 
             socket.off("message.update", handler); 
             socket.off("message.status", statusHandler);
+            socket.off("message.deleted", deletedHandler);
+            socket.off("message.edited", editedHandler);
         };
     }, [sessionId, jid, getSocket, joinSession]);
 
@@ -975,6 +1006,49 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
             }
         }
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    };
+
+    // Salvar edição de mensagem
+    const handleSaveEdit = async (mode?: 'resend_correction') => {
+        if (!editingMessage || !editText.trim()) return;
+        const newText = editText.trim();
+        if (!mode && newText === editingMessage.content) {
+            setEditingMessage(null);
+            return;
+        }
+
+        try {
+            setIsSubmittingEdit(true);
+            const targetKeyId = editingMessage.keyId;
+
+            const res = await fetch(`/api/messages/${sessionId}/${encodeURIComponent(jid)}/${targetKeyId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                    text: newText,
+                    mode 
+                })
+            });
+
+            const data = await res.json();
+            if (res.ok && data.status) {
+                if (data.mode === 'resend_correction') {
+                    toast.success("Mensagem de correção enviada citando a anterior!");
+                } else {
+                    setMessages(prev => prev.map(m => m.keyId === targetKeyId ? { ...m, content: newText } : m));
+                    toast.success("Mensagem editada com sucesso no WhatsApp!");
+                }
+                setEditingMessage(null);
+            } else if (data.expired) {
+                toast.error(data.message || "Limite de 15 minutos do WhatsApp excedido.");
+            } else {
+                toast.error(data.message || "Não foi possível editar a mensagem");
+            }
+        } catch (err: any) {
+            toast.error(err?.message || "Erro de rede ao tentar editar a mensagem");
+        } finally {
+            setIsSubmittingEdit(false);
+        }
     };
 
     // Focus input when replying
@@ -1297,6 +1371,10 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                     onDelete={(msg) => {
                         setDeleteConfirmMsg(msg);
                     }}
+                    onEdit={(msg) => {
+                        setEditingMessage(msg);
+                        setEditText(msg.content || "");
+                    }}
                 />
             )}
 
@@ -1307,6 +1385,119 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                     <p className="text-lg font-semibold text-primary">Drop files here</p>
                 </div>
             )}
+
+            {/* Edit message dialog */}
+            <Dialog open={!!editingMessage} onOpenChange={(open) => { if (!open) setEditingMessage(null); }}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-base">
+                            <Pencil className="h-4 w-4 text-blue-500" />
+                            Editar Mensagem Enviada
+                        </DialogTitle>
+                        <DialogDescription className="text-xs">
+                            Corrija erros de digitação ou ortografia. O WhatsApp atualizará o texto da mensagem para todos os participantes da conversa.
+                        </DialogDescription>
+                    </DialogHeader>
+                    {(() => {
+                        const messageAgeMs = editingMessage?.timestamp ? Date.now() - new Date(editingMessage.timestamp).getTime() : 0;
+                        const isOver15Min = messageAgeMs > 15 * 60 * 1000;
+                        const minutesElapsed = Math.floor(messageAgeMs / 60000);
+                        const minutesLeft = Math.max(0, 15 - minutesElapsed);
+
+                        return (
+                            <>
+                                {isOver15Min ? (
+                                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200 text-xs flex gap-2.5 items-start">
+                                        <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                                        <div className="space-y-1">
+                                            <p className="font-semibold text-amber-300">
+                                                Limite de 15 minutos do WhatsApp excedido ({minutesElapsed} min atrás)
+                                            </p>
+                                            <p className="text-amber-200/80 leading-relaxed text-[11px]">
+                                                O protocolo oficial do WhatsApp bloqueia a alteração retroativa no celular do destinatário para mensagens com mais de 15 minutos. Você pode enviar como <strong>mensagem de correção</strong> citando a anterior.
+                                            </p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-1.5 text-xs text-blue-400 bg-blue-500/10 px-2.5 py-1.5 rounded-lg border border-blue-500/20">
+                                        <Clock className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                                        <span>Tempo hábil para alterar no WhatsApp do cliente: <strong>{minutesLeft} min restantes</strong></span>
+                                    </div>
+                                )}
+                                <div className="py-2 space-y-2">
+                                    <textarea
+                                        value={editText}
+                                        onChange={(e) => setEditText(e.target.value)}
+                                        rows={4}
+                                        autoFocus
+                                        placeholder="Digite a mensagem corrigida..."
+                                        className="w-full resize-y rounded-xl border border-border/70 bg-muted/30 p-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50 leading-relaxed font-sans"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleSaveEdit(isOver15Min ? 'resend_correction' : undefined);
+                                            }
+                                        }}
+                                    />
+                                    <p className="text-[11px] text-muted-foreground">
+                                        Pressione <kbd className="px-1 py-0.5 bg-muted border rounded font-mono text-[9px]">Enter</kbd> para salvar ou <kbd className="px-1 py-0.5 bg-muted border rounded font-mono text-[9px]">Shift+Enter</kbd> para quebra de linha.
+                                    </p>
+                                </div>
+                                <DialogFooter className="gap-2 sm:gap-0">
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        onClick={() => setEditingMessage(null)}
+                                        disabled={isSubmittingEdit}
+                                        className="cursor-pointer text-xs"
+                                    >
+                                        Cancelar
+                                    </Button>
+                                    {isOver15Min ? (
+                                        <Button
+                                            type="button"
+                                            onClick={() => handleSaveEdit('resend_correction')}
+                                            disabled={isSubmittingEdit || !editText.trim()}
+                                            className="bg-amber-600 hover:bg-amber-700 text-white cursor-pointer text-xs gap-1.5 font-medium shadow-sm"
+                                        >
+                                            {isSubmittingEdit ? (
+                                                <>
+                                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    Enviando correção...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <CornerUpLeft className="h-3.5 w-3.5" />
+                                                    Enviar como Correção
+                                                </>
+                                            )}
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            type="button"
+                                            onClick={() => handleSaveEdit()}
+                                            disabled={isSubmittingEdit || !editText.trim() || editText.trim() === editingMessage?.content}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white cursor-pointer text-xs gap-1.5 font-medium shadow-sm"
+                                        >
+                                            {isSubmittingEdit ? (
+                                                <>
+                                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    Salvando alteração...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Check className="h-3.5 w-3.5" />
+                                                    Salvar Correção no WhatsApp
+                                                </>
+                                            )}
+                                        </Button>
+                                    )}
+                                </DialogFooter>
+                            </>
+                        );
+                    })()}
+                </DialogContent>
+            </Dialog>
 
             {/* Delete confirmation dialog */}
             <AlertDialog open={!!deleteConfirmMsg} onOpenChange={(open) => { if (!open) setDeleteConfirmMsg(null); }}>
@@ -1907,13 +2098,31 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                     </div>
                                 )}
                                 <div className={cn("flex gap-1 group", msg.fromMe ? "justify-end" : "justify-start")}>
-                                    {/* Reply button: my msg on left */}
+                                    {/* Actions for my message: on left */}
                                     {msg.fromMe && (
-                                        <button onClick={() => { setReplyingTo(msg); scrollToBottom(true); }}
-                                            className="self-center p-1.5 text-muted-foreground/40 hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100 cursor-pointer shrink-0 order-first"
-                                            title="Reply">
-                                            <CornerUpLeft className="h-3.5 w-3.5" />
-                                        </button>
+                                        <div className="flex items-center gap-0.5 self-center order-first opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                                            {msg.type === 'TEXT' && !msg.isDeleted && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setEditingMessage(msg);
+                                                        setEditText(msg.content || "");
+                                                    }}
+                                                    className="p-1.5 text-muted-foreground/40 hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-all cursor-pointer"
+                                                    title="Editar mensagem (corrigir texto)"
+                                                >
+                                                    <Pencil className="h-3.5 w-3.5" />
+                                                </button>
+                                            )}
+                                            <button
+                                                type="button"
+                                                onClick={() => { setReplyingTo(msg); scrollToBottom(true); }}
+                                                className="p-1.5 text-muted-foreground/40 hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all cursor-pointer"
+                                                title="Responder"
+                                            >
+                                                <CornerUpLeft className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
                                     )}
                                     <div className={cn(
                                         "flex flex-col max-w-[85%] sm:max-w-[70%] rounded-2xl px-3 py-2 shadow-sm overflow-hidden cursor-context-menu",
@@ -2142,6 +2351,21 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                                         </Button>
                                                     </div>
                                                 )}
+                                            </div>
+                                        )}
+                                        {/* Deleted for everyone notice (content preserved) */}
+                                        {msg.isDeleted && (
+                                            <div className={cn(
+                                                "flex items-center gap-1.5 mt-1 mb-0.5 px-2 py-1 rounded-md text-[11px] italic font-medium select-none",
+                                                msg.fromMe ? "bg-primary-foreground/15 text-primary-foreground/90" : "bg-red-500/10 text-red-600 dark:text-red-400"
+                                            )}>
+                                                <Ban className="h-3.5 w-3.5 shrink-0" />
+                                                <span>
+                                                    {msg.type === 'AUDIO' ? "Áudio apagado para todos"
+                                                        : msg.type === 'VIDEO' ? "Vídeo apagado para todos"
+                                                        : msg.type === 'IMAGE' ? "Foto apagada para todos"
+                                                        : "Mensagem apagada para todos"}
+                                                </span>
                                             </div>
                                         )}
                                         {/* Text & Footer (Timestamp + WhatsApp Status Icons) */}

@@ -106,6 +106,7 @@ model Message {
   content     String?       @db.Text // Text content or Caption
   mediaUrl    String?       @db.Text // Path to file if media
   status      MessageStatus @default(PENDING)
+  isDeleted   Boolean       @default(false) // Revoked "for everyone" by sender (content preserved)
   timestamp   DateTime      @default(now())
   
   quoteId     String?       // For replies

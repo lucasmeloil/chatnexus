@@ -85,7 +85,11 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
                         else if (content?.stickerMessage) { mType = "STICKER"; previewText = "🏷️ Figurinha recebida"; }
                         else if (content?.locationMessage) { mType = "LOCATION"; previewText = "📍 Localização recebida"; }
                         else if (content?.contactMessage) { mType = "CONTACT"; previewText = content.contactMessage.displayName || "👤 Contato compartilhado"; }
-                        else previewText = "Nova mensagem recebida";
+                    }
+
+                    // Ignorar notificações instantâneas para mensagens vazias ou técnicas
+                    if (!previewText || previewText.trim().length === 0) {
+                        continue;
                     }
 
                     const instantPayload = {
@@ -491,6 +495,13 @@ async function processAndSaveMessage(
                     data: { content: newText } // Note: we don't update timestamp of original
                 });
 
+                // Notificar frontend em tempo real
+                io?.to(sessionId).emit("message.edited", {
+                    keyId: targetKeyId,
+                    remoteJid,
+                    newContent: newText
+                });
+
                 // Trigger Webhook
                 if (triggerWebhook) {
                     dispatchWebhook(sessionId, "message.edited", {
@@ -506,44 +517,17 @@ async function processAndSaveMessage(
 
         // Message Revoke/Deleted (Type 0)
         if (pMessage?.type === 0 && targetKeyId) {
-            // Check anti-delete config
-            let antiDeleteEnabled = false;
-            try {
-                const s = await prisma.session.findUnique({
-                    where: { sessionId },
-                    select: { config: true }
-                });
-                antiDeleteEnabled = !!(s?.config as any)?.antiDelete;
-            } catch {}
+            // Always preserve original content/media and flag as deleted for everyone
+            await prisma.message.updateMany({
+                where: { sessionId: dbSessionId, keyId: targetKeyId },
+                data: { isDeleted: true }
+            });
 
-            if (antiDeleteEnabled) {
-                // Anti-delete: read original, keep content, append marker
-                const orig = await prisma.message.findFirst({
-                    where: { sessionId: dbSessionId, keyId: targetKeyId },
-                    select: { content: true }
-                });
-                const preserved = (orig?.content || "") + "\n\n🛡️ [Deleted by sender — preserved]";
-                await prisma.message.updateMany({
-                    where: { sessionId: dbSessionId, keyId: targetKeyId },
-                    data: { content: preserved }
-                });
-                // Re-fetch & re-emit so frontend updates
-                const updated = await prisma.message.findFirst({
-                    where: { sessionId: dbSessionId, keyId: targetKeyId }
-                });
-                if (updated) {
-                    io?.to(sessionId).emit("message.update", [{
-                        ...updated,
-                        timestamp: updated.timestamp instanceof Date ? updated.timestamp.toISOString() : updated.timestamp
-                    }]);
-                }
-            } else {
-                // Normal: mark as deleted
-                await prisma.message.updateMany({
-                    where: { sessionId: dbSessionId, keyId: targetKeyId },
-                    data: { content: "[This message was deleted]", status: "FAILED" }
-                });
-            }
+            // Notify frontend in real time (dedicated event to avoid re-triggering new-message alerts)
+            io?.to(sessionId).emit("message.deleted", {
+                keyId: targetKeyId,
+                remoteJid
+            });
 
             // Trigger Webhook
             if (triggerWebhook) {
@@ -557,21 +541,26 @@ async function processAndSaveMessage(
         }
     }
 
-    const ignoredTypes = [
+    const technicalKeys = new Set([
         'protocolMessage',
         'senderKeyDistributionMessage',
-        'reactionMessage', // Optional: User might want reactions, but usually "kosong" means junk
-        'keepInChatMessage'
-    ];
+        'reactionMessage',
+        'keepInChatMessage',
+        'messageContextInfo',
+        'deviceSentMessage',
+        'deviceListMetadata',
+        'bcallMessage',
+        'callLogRecordMessage',
+        'keyExpiration'
+    ]);
 
-    // If message only contains ignored types, skip (since edit and revoke handled above)
-    if (messageKeys.every(k => ignoredTypes.includes(k))) {
+    // If message only contains technical/sync/protocol keys, skip (since edit and revoke handled above)
+    if (messageKeys.every(k => technicalKeys.has(k))) {
         logger.debug("Store", `Skipping technical message: ${keyId} (${messageKeys.join(', ')})`);
         return null;
     }
 
     // Check if message already exists to avoid duplicates
-    // Baileys 'notify' event can sometimes trigger multiple times or for history
     // Baileys 'notify' event can sometimes trigger multiple times or for history
     const existingMessage = await prisma.message.findUnique({
         where: { sessionId_keyId: { sessionId: dbSessionId, keyId: keyId! } },
@@ -623,6 +612,16 @@ async function processAndSaveMessage(
     } else if (messageContent?.contactMessage) {
         messageType = "CONTACT";
         text = messageContent.contactMessage.displayName || "";
+    }
+
+    // Validação estrita: somente mensagens reais (texto com conteúdo, mídias válidas, localização ou contato)
+    const hasText = Boolean(text && text.trim().length > 0);
+    const isMedia = ['IMAGE', 'VIDEO', 'AUDIO', 'DOCUMENT', 'STICKER'].includes(messageType);
+    const isSpecialWithContent = ['LOCATION', 'CONTACT'].includes(messageType) && Boolean(text && text.trim().length > 0);
+
+    if (!hasText && !isMedia && !isSpecialWithContent) {
+        logger.debug("Store", `[Ignored] Blank message with no text or media content: ${keyId} (${remoteJid})`);
+        return null;
     }
 
     // Determine effective participant for groups

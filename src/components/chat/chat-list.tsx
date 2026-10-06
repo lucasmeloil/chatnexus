@@ -232,6 +232,8 @@ function ChatContextMenu({
     );
 }
 
+const avatarCheckedJids = new Set<string>();
+
 // ─── Chat Row ──────────────────────
 function ChatRow({
     chat, isSelected, onSelect, sessionId, labelDots, isFinalized, onReopen, onAccept, onReject, currentUserId
@@ -245,6 +247,24 @@ function ChatRow({
     const isWaiting = chat.attendance?.status === "WAITING" && !isFinalized;
     const isMine = chat.attendance?.status === "IN_PROGRESS" && chat.attendance?.assignedUserId === currentUserId;
     const isOtherAssigned = chat.attendance?.status === "IN_PROGRESS" && chat.attendance?.assignedUserId && chat.attendance?.assignedUserId !== currentUserId;
+
+    // Busca automaticamente a foto de perfil da pessoa caso ainda não esteja em cache
+    useEffect(() => {
+        if (chat.profilePic || !sessionId || !chat.jid || chat.jid.endsWith('@g.us')) return;
+        if (avatarCheckedJids.has(chat.jid)) return;
+        avatarCheckedJids.add(chat.jid);
+
+        fetch(`/api/chat/${sessionId}/${encodeURIComponent(chat.jid)}/profile-picture`)
+            .then(res => res.json())
+            .then(data => {
+                if (data?.profilePicUrl) {
+                    window.dispatchEvent(new CustomEvent("nexus:contact-updated", {
+                        detail: { jid: chat.jid, profilePic: data.profilePicUrl }
+                    }));
+                }
+            })
+            .catch(() => {});
+    }, [sessionId, chat.jid, chat.profilePic]);
 
     return (
         <>
@@ -272,7 +292,7 @@ function ChatRow({
             >
                 <div className="relative shrink-0">
                     <Avatar className="h-10 w-10 flex-shrink-0">
-                        <AvatarImage src={chat.profilePic || ""} />
+                        <AvatarImage src={chat.profilePic || undefined} />
                         <AvatarFallback className="text-xs font-medium bg-gradient-to-br from-primary/20 to-blue-500/20 text-primary">
                             {displayName.slice(0, 2).toUpperCase()}
                         </AvatarFallback>

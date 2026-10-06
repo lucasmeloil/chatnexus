@@ -41,7 +41,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: new URL(APP_URL),
     title: {
-      default: "Nexus Chat | Multi Atendimento",
+      default: "Nexus Chat | Multi Atendimentoadmin@wa-akg.local",
       template: "%s | NEXUS CHAT",
     },
     icons: {
