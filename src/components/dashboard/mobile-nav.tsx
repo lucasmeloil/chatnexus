@@ -117,7 +117,11 @@ export function MobileNav({ appName = "NEXUS CHAT" }: { appName?: string }) {
                     <SheetTitle className="sr-only">{appName}</SheetTitle>
                     <SheetDescription className="sr-only">NEXUS CHAT</SheetDescription>
                     <div className="flex items-center">
-                        <img src="/nexus-logo.png" alt="NEXUS CHAT" className="h-8 w-auto object-contain" />
+                        <img 
+                            src="/nexus-chat-logo.png" 
+                            alt="NEXUS CHAT" 
+                            className="h-8 w-auto object-contain" 
+                        />
                     </div>
                 </SheetHeader>
 

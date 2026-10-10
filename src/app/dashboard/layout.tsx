@@ -3,7 +3,6 @@ import { Navbar } from "@/components/dashboard/navbar";
 import { SessionProvider } from "@/components/dashboard/session-provider";
 import { SidebarProvider } from "@/components/dashboard/sidebar-context";
 import { SidebarShell } from "@/components/dashboard/sidebar-shell";
-import { UpdateChecker } from "@/components/dashboard/update-checker";
 import { RegistrationWarning } from "@/components/dashboard/registration-warning";
 import { MessageNotificationListener } from "@/components/dashboard/message-notification-listener";
 import { prisma } from "@/lib/prisma";
@@ -25,7 +24,6 @@ export default async function DashboardLayout({
         <SessionProvider>
             <SidebarProvider>
                 <MessageNotificationListener />
-                <UpdateChecker />
                 <RegistrationWarning
                     role={session?.user?.role as string}
                     registrationEnabled={registrationEnabled}

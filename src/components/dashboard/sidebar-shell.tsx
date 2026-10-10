@@ -33,7 +33,7 @@ export function SidebarShell({ appName, userName, userEmail, version }: SidebarS
                         <button
                             onClick={toggleCollapse}
                             title="Clique para expandir o menu"
-                            className="group relative flex items-center justify-center p-1.5 rounded-xl hover:bg-primary/10 transition-all focus:outline-none"
+                            className="group relative flex items-center justify-center p-1.5 rounded-xl hover:bg-primary/10 transition-all focus:outline-none cursor-pointer"
                         >
                             <img 
                                 src="/nexus-icon.png" 
@@ -46,15 +46,15 @@ export function SidebarShell({ appName, userName, userEmail, version }: SidebarS
                     <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center min-w-0">
                             <img 
-                                src="/nexus-logo.png" 
+                                src="/nexus-chat-logo.png" 
                                 alt="NEXUS CHAT" 
-                                className="h-8 w-auto max-w-[170px] object-contain drop-shadow-sm" 
+                                className="h-8 w-auto max-w-[180px] object-contain drop-shadow-sm" 
                             />
                         </div>
                         <button
                             onClick={toggleCollapse}
                             title="Recolher menu lateral"
-                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all flex items-center justify-center flex-shrink-0"
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-all flex items-center justify-center flex-shrink-0 cursor-pointer"
                             aria-label="Recolher menu lateral"
                         >
                             <PanelLeftClose size={18} />

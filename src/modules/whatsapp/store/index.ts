@@ -50,9 +50,9 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
             logger.debug("Store", `Received ${messages.length} messages of type: ${type}`);
         }
 
-        // Only single or very small batches are genuine real-time messages.
-        // Large batches (> 5) indicate an offline catch-up dump where we should not sound alarms or spam auto-replies.
-        const isLiveNotify = type === 'notify' && messages.length <= 5;
+        // Small batches (<= 5) of notify or append are genuine real-time messages.
+        // Large batches indicate an offline catch-up dump where we should not sound alarms.
+        const isLiveNotify = (type === 'notify' || type === 'append') && messages.length <= 5;
 
         // Instant broadcast for real-time contact messages (zero delay floating alerts & audio chimes)
         if (isLiveNotify) {
@@ -167,6 +167,7 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
             }));
             logger.debug("Socket", `Emitting message.update for ${serialized.length} messages in session ${sessionId}`);
             io?.to(sessionId).emit('message.update', serialized);
+            io?.emit('message.update', serialized);
 
             // Redundant global emission for sound and floating notification across all dashboard operators (only for live messages)
             if (isLiveNotify) {
@@ -211,6 +212,9 @@ export const bindSessionStore = (sock: WASocket, sessionId: string, io: Server |
                 }
             }
             logger.success("Store", `Finished syncing ${messages.length} historical messages`);
+            // Notify active chat windows and chat list to display newly pulled history
+            io?.to(sessionId).emit('message.update');
+            io?.emit('message.update');
         }
 
         // Note: Contacts and Chats are synced by src/modules/whatsapp/store/contacts.ts
@@ -612,6 +616,21 @@ async function processAndSaveMessage(
     } else if (messageContent?.contactMessage) {
         messageType = "CONTACT";
         text = messageContent.contactMessage.displayName || "";
+    } else if (messageContent?.buttonsResponseMessage?.selectedDisplayText) {
+        text = messageContent.buttonsResponseMessage.selectedDisplayText;
+    } else if (messageContent?.templateButtonReplyMessage?.selectedDisplayText) {
+        text = messageContent.templateButtonReplyMessage.selectedDisplayText;
+    } else if (messageContent?.listResponseMessage?.title) {
+        text = messageContent.listResponseMessage.title;
+    } else if (messageContent?.interactiveResponseMessage) {
+        try {
+            const params = JSON.parse(messageContent.interactiveResponseMessage.nativeFlowResponseMessage?.paramsJson || "{}");
+            text = params.title || params.id || "Resposta interativa";
+        } catch {
+            text = "Resposta interativa";
+        }
+    } else if (messageContent?.pollCreationMessage) {
+        text = messageContent.pollCreationMessage.name || "Enquete";
     }
 
     // Validação estrita: somente mensagens reais (texto com conteúdo, mídias válidas, localização ou contato)
@@ -681,8 +700,14 @@ async function processAndSaveMessage(
 
     try {
         const finalRemoteJid = normalizedRemoteJid;
-        const newMessage = await prisma.message.create({
-            data: {
+        const newMessage = await prisma.message.upsert({
+            where: {
+                sessionId_keyId: {
+                    sessionId: dbSessionId,
+                    keyId
+                }
+            },
+            create: {
                 sessionId: dbSessionId,
                 remoteJid: finalRemoteJid,
                 senderJid,
@@ -695,6 +720,10 @@ async function processAndSaveMessage(
                 status: fromMe ? "SENT" : "PENDING",
                 timestamp,
                 quoteId
+            },
+            update: {
+                pushName: pushName || undefined,
+                content: text || undefined,
             }
         });
         

@@ -44,6 +44,7 @@ export async function POST(
         // --- Standard mode vars ---
         let recipients: string[] = [];
         let message = "";
+        let customMessages: string[] | null = null;
         let standardFileBuffer: Buffer | null = null;
         let standardFileName = "";
         let standardMimeType = "";
@@ -108,6 +109,13 @@ export async function POST(
                 }
                 message = (formData.get("message") as string) || "";
 
+                const customMessagesRaw = formData.get("customMessages");
+                if (typeof customMessagesRaw === "string") {
+                    try {
+                        customMessages = JSON.parse(customMessagesRaw);
+                    } catch {}
+                }
+
                 const file = formData.get("file") as File | null;
                 if (file && file.size > 0) {
                     const arrayBuffer = await file.arrayBuffer();
@@ -132,6 +140,9 @@ export async function POST(
             } else {
                 recipients = body.recipients || [];
                 message = body.message || "";
+                if (Array.isArray(body.customMessages)) {
+                    customMessages = body.customMessages;
+                }
             }
         }
 
@@ -224,6 +235,10 @@ export async function POST(
                         }
                     } else {
                         // Standard mode
+                        const msgToSend = (customMessages && customMessages[i] !== undefined)
+                            ? customMessages[i]
+                            : message;
+
                         if (standardFileBuffer) {
                             await ChatService.sendMediaMessage(
                                 sessionId,
@@ -232,10 +247,10 @@ export async function POST(
                                 standardMediaType,
                                 standardMimeType,
                                 standardFileName,
-                                message
+                                msgToSend
                             );
                         } else {
-                            await instance.socket!.sendMessage(targetJid, { text: message });
+                            await instance.socket!.sendMessage(targetJid, { text: msgToSend });
                         }
                     }
 

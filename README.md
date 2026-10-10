@@ -236,9 +236,11 @@ O sistema inclui documentação interativa completa de todas as rotas da API em 
 
 ---
 
-## 🛡️ Diretrizes de Manutenção
+## 🛡️ Diretrizes de Manutenção e Governança do Agente
 
 Para qualquer modificação ou expansão no código:
-- Respeitar rigorosamente o arquivo [AGENTS.md](file:///d:/NexusChat/AGENTS.md) e [GEMINI.md](file:///d:/NexusChat/GEMINI.md).
-- O agente só pode alterar o que for solicitado diretamente no prompt.
-- Quaisquer sugestões ou melhorias não solicitadas devem ser apresentadas antecipadamente via relatório/pergunta para aprovação do usuário.
+- **Escopo Estrito e Pontual**: O agente **SÓ DEVE ALTERAR O QUE FOR EXPRESSAMENTE SOLICITADO NO PROMPT DO USUÁRIO**.
+- **Tratamento de Erros Encontrados no Caminho**: Se o agente encontrar qualquer erro, inconsistência ou falha que não tenha sido solicitada diretamente no prompt, **NÃO DEVE ALTERAR O CÓDIGO POR CONTA PRÓPRIA**. Deve **obrigatoriamente informar o usuário e perguntar se ele autoriza a correção**.
+- **Respeito às Regras Globais**: Respeitar rigorosamente os arquivos [AGENTS.md](file:///d:/NexusChat/AGENTS.md) e [GEMINI.md](file:///d:/NexusChat/GEMINI.md).
+- **Proibição de Refatorações Espontâneas**: Toda e qualquer sugestão ou melhoria arquitetural deve ser apresentada em relatório prévio aguardando aprovação explícita antes de qualquer edição.
+

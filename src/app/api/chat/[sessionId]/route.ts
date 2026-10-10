@@ -21,9 +21,14 @@ export async function GET(
             return NextResponse.json({ status: false, message: "Forbidden - Cannot access this session", error: "Forbidden" }, { status: 403 });
         }
 
-        // Get the database Session ID (cuid) from the sessionId string
-        const session = await prisma.session.findUnique({
-            where: { sessionId },
+        // Get the database Session ID (cuid) from the sessionId or id string
+        const session = await prisma.session.findFirst({
+            where: {
+                OR: [
+                    { sessionId },
+                    { id: sessionId }
+                ]
+            },
             select: { id: true }
         });
 

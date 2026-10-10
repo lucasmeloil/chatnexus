@@ -16,21 +16,41 @@ export async function getChatsStatus(
     before?: string,
     search?: string
 ) {
+    if (!sessionId) return [];
+
     const user = await getAuthenticatedUserForAction();
-    if (!user) throw new Error("Unauthorized");
+    if (!user) return [];
 
     const canAccess = await canAccessSession(user.id, user.role, sessionId);
-    if (!canAccess) throw new Error("Forbidden");
+    if (!canAccess) return [];
 
-    const session = await prisma.session.findUnique({
-        where: { sessionId },
-        select: { id: true }
+    // Resolve session by either sessionId string OR database cuid id
+    let session = await prisma.session.findFirst({
+        where: {
+            OR: [
+                { sessionId },
+                { id: sessionId }
+            ]
+        },
+        select: { id: true, sessionId: true }
     });
 
-    if (!session) throw new Error("Session not found");
+    if (!session) {
+        const fallbackSession = await prisma.session.findFirst({
+            where: user.role === "SUPERADMIN" ? {} : { userId: user.id },
+            orderBy: { createdAt: "desc" },
+            select: { id: true, sessionId: true }
+        });
+        if (fallbackSession) {
+            session = fallbackSession;
+        } else {
+            return [];
+        }
+    }
 
+    const effectiveSessionId = session.sessionId;
     const rawChats = await ChatService.getChatsList(session.id, limit, before, search);
-    const attendancesMap = await AttendanceService.getAttendancesMap(sessionId);
+    const attendancesMap = await AttendanceService.getAttendancesMap(effectiveSessionId);
 
     return rawChats.map((chat: any) => {
         const att = attendancesMap.get(chat.jid);
@@ -62,27 +82,38 @@ export async function getChatMessages(
     limit = 50,
     before?: string
 ) {
+    if (!sessionId || !jid) return { messages: [], hasMore: false };
+
     const user = await getAuthenticatedUserForAction();
-    if (!user) throw new Error("Unauthorized");
+    if (!user) return { messages: [], hasMore: false };
 
     const canAccess = await canAccessSession(user.id, user.role, sessionId);
-    if (!canAccess) throw new Error("Forbidden");
+    if (!canAccess) return { messages: [], hasMore: false };
+
+    let session = await prisma.session.findFirst({
+        where: {
+            OR: [
+                { sessionId },
+                { id: sessionId }
+            ]
+        },
+        select: { id: true, sessionId: true }
+    });
+
+    if (!session) {
+        return { messages: [], hasMore: false };
+    }
+
+    const effectiveSessionId = session.sessionId;
 
     // Attendant Isolation Security Check:
     // Any user who is not a SUPERADMIN cannot view another attendant's in-progress conversation
     if (user.role !== "SUPERADMIN") {
-        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        const attendance = await AttendanceService.getAttendance(effectiveSessionId, jid);
         if (attendance && attendance.status === "IN_PROGRESS" && attendance.assignedUserId && attendance.assignedUserId !== user.id) {
             throw new Error(`Esta conversa está em atendimento por ${attendance.assignedUserName || "outro atendente"}.`);
         }
     }
-
-    const session = await prisma.session.findUnique({
-        where: { sessionId },
-        select: { id: true }
-    });
-
-    if (!session) throw new Error("Session not found");
 
     const { messages, hasMore } = await ChatService.getMessages(session.id, jid, limit, before);
 
@@ -105,8 +136,19 @@ export async function sendChatMessage(sessionId: string, jid: string, text: stri
     const canAccess = await canAccessSession(user.id, user.role, sessionId);
     if (!canAccess) throw new Error("Forbidden");
 
+    const session = await prisma.session.findFirst({
+        where: {
+            OR: [
+                { sessionId },
+                { id: sessionId }
+            ]
+        },
+        select: { sessionId: true }
+    });
+    const effectiveSessionId = session?.sessionId || sessionId;
+
     if (user.role !== "SUPERADMIN") {
-        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        const attendance = await AttendanceService.getAttendance(effectiveSessionId, jid);
         if (attendance && attendance.status === "IN_PROGRESS" && attendance.assignedUserId && attendance.assignedUserId !== user.id) {
             throw new Error(`Você não tem permissão para enviar mensagens nesta conversa pois ela pertence a ${attendance.assignedUserName || "outro atendente"}.`);
         }
@@ -114,13 +156,13 @@ export async function sendChatMessage(sessionId: string, jid: string, text: stri
 
     // Auto-accept if conversation is WAITING
     try {
-        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        const attendance = await AttendanceService.getAttendance(effectiveSessionId, jid);
         if (!attendance || attendance.status === "WAITING") {
-            const updated = await AttendanceService.acceptAttendance(sessionId, jid, user.id, user.name || "Atendente");
+            const updated = await AttendanceService.acceptAttendance(effectiveSessionId, jid, user.id, user.name || "Atendente");
             const globalIo = (global as any).io;
             if (globalIo) {
-                globalIo.emit("attendance.update", { sessionId, jid, action: "accept", data: updated });
-                globalIo.to(sessionId).emit("attendance.update", { sessionId, jid, action: "accept", data: updated });
+                globalIo.emit("attendance.update", { sessionId: effectiveSessionId, jid, action: "accept", data: updated });
+                globalIo.to(effectiveSessionId).emit("attendance.update", { sessionId: effectiveSessionId, jid, action: "accept", data: updated });
             }
         }
     } catch (e) {
@@ -128,7 +170,7 @@ export async function sendChatMessage(sessionId: string, jid: string, text: stri
     }
 
     try {
-        await ChatService.sendTextMessage(sessionId, jid, { text }, undefined, quotedMessageId);
+        await ChatService.sendTextMessage(effectiveSessionId, jid, { text }, undefined, quotedMessageId);
         return { success: true };
     } catch (error: any) {
         throw new Error(`Failed to send message: ${error.message}`);
@@ -153,8 +195,19 @@ export async function sendMediaMessage(formData: FormData) {
     const canAccess = await canAccessSession(user.id, user.role, sessionId);
     if (!canAccess) throw new Error("Forbidden");
 
+    const session = await prisma.session.findFirst({
+        where: {
+            OR: [
+                { sessionId },
+                { id: sessionId }
+            ]
+        },
+        select: { sessionId: true }
+    });
+    const effectiveSessionId = session?.sessionId || sessionId;
+
     if (user.role !== "SUPERADMIN") {
-        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        const attendance = await AttendanceService.getAttendance(effectiveSessionId, jid);
         if (attendance && attendance.status === "IN_PROGRESS" && attendance.assignedUserId && attendance.assignedUserId !== user.id) {
             throw new Error(`Você não tem permissão para enviar arquivos nesta conversa pois ela pertence a ${attendance.assignedUserName || "outro atendente"}.`);
         }
@@ -162,13 +215,13 @@ export async function sendMediaMessage(formData: FormData) {
 
     // Auto-accept if conversation is WAITING
     try {
-        const attendance = await AttendanceService.getAttendance(sessionId, jid);
+        const attendance = await AttendanceService.getAttendance(effectiveSessionId, jid);
         if (!attendance || attendance.status === "WAITING") {
-            const updated = await AttendanceService.acceptAttendance(sessionId, jid, user.id, user.name || "Atendente");
+            const updated = await AttendanceService.acceptAttendance(effectiveSessionId, jid, user.id, user.name || "Atendente");
             const globalIo = (global as any).io;
             if (globalIo) {
-                globalIo.emit("attendance.update", { sessionId, jid, action: "accept", data: updated });
-                globalIo.to(sessionId).emit("attendance.update", { sessionId, jid, action: "accept", data: updated });
+                globalIo.emit("attendance.update", { sessionId: effectiveSessionId, jid, action: "accept", data: updated });
+                globalIo.to(effectiveSessionId).emit("attendance.update", { sessionId: effectiveSessionId, jid, action: "accept", data: updated });
             }
         }
     } catch (e) {
@@ -179,7 +232,7 @@ export async function sendMediaMessage(formData: FormData) {
         const buffer = Buffer.from(await file.arrayBuffer());
 
         await ChatService.sendMediaMessage(
-            sessionId,
+            effectiveSessionId,
             jid,
             buffer,
             type,
@@ -194,3 +247,15 @@ export async function sendMediaMessage(formData: FormData) {
         throw new Error(`Failed to send media: ${error.message}`);
     }
 }
+
+// Request past message history for a specific chat directly from the mobile device
+export async function syncChatHistoryFromDevice(sessionId: string, jid: string, count = 50) {
+    const user = await getAuthenticatedUserForAction();
+    if (!user) throw new Error("Unauthorized");
+
+    const canAccess = await canAccessSession(user.id, user.role, sessionId);
+    if (!canAccess) throw new Error("Forbidden");
+
+    return await ChatService.syncHistoryFromDevice(sessionId, jid, count);
+}
+

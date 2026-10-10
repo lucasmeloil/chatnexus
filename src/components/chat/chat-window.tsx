@@ -392,7 +392,10 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
         let active = true;
 
         fetch(`/api/chat/${sessionId}/${encodeURIComponent(jid)}/profile-picture`)
-            .then(res => res.json())
+            .then(async res => {
+                if (!res.ok) return null;
+                return res.json().catch(() => null);
+            })
             .then(data => {
                 if (active && data?.profilePicUrl) {
                     setHeaderProfilePic(data.profilePicUrl);
@@ -404,7 +407,10 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
             .catch(() => {});
 
         fetch(`/api/labels/${sessionId}/chats?jid=${encodeURIComponent(jid)}`)
-            .then(res => res.json())
+            .then(async res => {
+                if (!res.ok) return null;
+                return res.json().catch(() => null);
+            })
             .then(data => {
                 if (active && data?.status && Array.isArray(data.data)) {
                     setContactLabels(data.data.map((l: any) => ({
@@ -462,16 +468,16 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
 
             let hasFinLabel = false;
             if (labelsRes.ok) {
-                const data = await labelsRes.json();
-                const list = data.data || [];
+                const data = await labelsRes.json().catch(() => null);
+                const list = data?.data || [];
                 const fin = list.find((l: any) => l.labelName?.toLowerCase() === "finalizado");
                 hasFinLabel = !!fin;
                 setFinalizedLabelId(fin?.labelId || null);
             }
 
             if (attRes.ok) {
-                const data = await attRes.json();
-                const attendances = data.data?.attendances || [];
+                const data = await attRes.json().catch(() => null);
+                const attendances = data?.data?.attendances || [];
                 const found = attendances.find((a: any) => isSameChatJid(a.chatJid, jid));
                 if (found) {
                     setAttendance(found);
@@ -625,9 +631,12 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
     useEffect(() => {
         if (isTransferDialogOpen && sessionId) {
             fetch(`/api/sessions/${sessionId}/attendants`)
-                .then(res => res.json())
+                .then(async res => {
+                    if (!res.ok) return null;
+                    return res.json().catch(() => null);
+                })
                 .then(data => {
-                    const list = data.data || [];
+                    const list = data?.data || [];
                     setAvailableAttendants(list);
                     if (list.length > 0 && selectedAttendant === "QUEUE") {
                         const other = list.find((a: any) => a.userId !== currentUserId) || list[0];
@@ -646,9 +655,12 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
     // Load quick replies
     useEffect(() => {
         fetch("/api/quick-replies")
-            .then(res => res.json())
+            .then(async res => {
+                if (!res.ok) return null;
+                return res.json().catch(() => null);
+            })
             .then(data => {
-                if (data.success) setQuickReplies(data.data || []);
+                if (data?.success) setQuickReplies(data.data || []);
             })
             .catch(() => { });
     }, []);
@@ -657,8 +669,8 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
     const assignLabelToChat = async (labelName: string, colorHex: string = "#3b82f6") => {
         try {
             const res = await fetch(`/api/labels/${sessionId}`);
-            const data = await res.json();
-            let label = data.data?.labels?.find((l: any) => l.name.toLowerCase() === labelName.toLowerCase());
+            const data = await res.json().catch(() => null);
+            let label = data?.data?.labels?.find((l: any) => l.name.toLowerCase() === labelName.toLowerCase());
 
             if (!label) {
                 const createRes = await fetch(`/api/labels/${sessionId}`, {
@@ -666,8 +678,8 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ name: labelName, color: 0, colorHex }),
                 });
-                const createData = await createRes.json();
-                label = createData.data?.label || createData.data;
+                const createData = await createRes.json().catch(() => null);
+                label = createData?.data?.label || createData?.data;
             }
 
             if (label?.id) {
@@ -854,9 +866,26 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
         if (socket.connected) joinSession(sessionId);
         socket.on("connect", onConnect);
         const normalizedJid = jid.endsWith("@c.us") ? jid.replace("@c.us", "@s.whatsapp.net") : jid;
-        const handler = (newMessages: Message[]) => {
+        const handler = (newMessages?: Message[]) => {
+            if (!newMessages || !Array.isArray(newMessages)) {
+                getChatMessages(sessionId, jid, PAGE_LIMIT).then((data: any) => {
+                    if (data?.messages?.length > 0) {
+                        setMessages(prev => {
+                            const combined = [...prev, ...data.messages];
+                            const unique = Array.from(new Map(combined.map((m: any) => [m.keyId, m])).values());
+                            return unique.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                        });
+                        setHasMore(data.hasMore);
+                    }
+                }).catch(() => {});
+                return;
+            }
             setMessages(prev => {
-                const relevant = newMessages.filter(m => m.remoteJid === normalizedJid || prev.some(p => p.remoteJid === m.remoteJid));
+                const relevant = newMessages.filter(m => 
+                    isSameChatJid(m.remoteJid, jid) || 
+                    isSameChatJid(m.remoteJid, normalizedJid) || 
+                    prev.some(p => isSameChatJid(p.remoteJid, m.remoteJid))
+                );
                 if (relevant.length === 0) return prev;
                 const combined = [...prev, ...relevant];
                 const unique = Array.from(new Map(combined.map(m => [m.keyId, m])).values());
@@ -916,10 +945,14 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
         const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
         setAutoScroll(atBottom);
         if (atBottom) setNewMsgBadge(false);
+
+        // Ao rolar para cima, carrega mensagens anteriores salvas no banco
         if (el.scrollTop < 100 && hasMore && !loadingMore && oldestTimestamp) {
             const prevHeight = el.scrollHeight;
             fetchMessages(oldestTimestamp).then(() => {
-                requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight - prevHeight; });
+                requestAnimationFrame(() => { 
+                    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight - prevHeight; 
+                });
             });
         }
     }, [hasMore, loadingMore, oldestTimestamp, fetchMessages]);
@@ -1612,6 +1645,8 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                         </Button>
                     )}
 
+
+
                     {!isLockedForMe && (
                         <Button
                             type="button"
@@ -2049,42 +2084,25 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                             <div className="h-6 w-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                         </div>
                     )}
-                    {hasMore && (
+                    {hasMore && loadingMore && (
                         <div className="flex justify-center py-2">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                    if (!loadingMore && oldestTimestamp) {
-                                        const prevHeight = scrollRef.current?.scrollHeight || 0;
-                                        fetchMessages(oldestTimestamp).then(() => {
-                                            requestAnimationFrame(() => {
-                                                if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight - prevHeight;
-                                            });
-                                        });
-                                    }
-                                }}
-                                disabled={loadingMore}
-                                className="text-xs h-7 gap-1.5 rounded-full bg-background/80 backdrop-blur-sm shadow-xs border-border/40 hover:bg-muted cursor-pointer"
-                            >
-                                {loadingMore ? (
-                                    <>
-                                        <Loader2 className="h-3 w-3 animate-spin text-primary" />
-                                        <span>Carregando histórico...</span>
-                                    </>
-                                ) : (
-                                    <span>Carregar mensagens anteriores</span>
-                                )}
-                            </Button>
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground animate-pulse">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                                <span>Carregando histórico...</span>
+                            </div>
                         </div>
                     )}
                     {!hasMore && messages.length > 0 && (
-                        <div className="text-center py-4">
-                            <span className="text-[10px] font-medium text-muted-foreground bg-background/80 px-3 py-1 rounded-full border border-border/30">Início da conversa</span>
+                        <div className="text-center py-3">
+                            <span className="text-[10px] font-medium text-muted-foreground bg-background/80 px-3 py-1 rounded-full border border-border/30">
+                                Início da conversa
+                            </span>
                         </div>
                     )}
                     {messages.length === 0 && !loading && (
-                        <div className="flex-1 flex items-center justify-center py-16"><p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p></div>
+                        <div className="flex-1 flex items-center justify-center py-16">
+                            <p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p>
+                        </div>
                     )}
                     {messages.map((msg, idx) => {
                         const showDate = idx === 0 || getDateLabel(msg.timestamp) !== getDateLabel(messages[idx - 1].timestamp);

@@ -329,7 +329,10 @@ export class ChatService {
         let quotedOption: any = undefined;
         if (quotedMessageId) {
             try {
-                const dbSession = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
+                const dbSession = await prisma.session.findFirst({
+                    where: { OR: [{ sessionId }, { id: sessionId }] },
+                    select: { id: true }
+                });
                 if (dbSession) {
                     const quotedMsg = await prisma.message.findFirst({
                         where: { sessionId: dbSession.id, keyId: quotedMessageId },
@@ -489,7 +492,10 @@ export class ChatService {
         // Instant DB persistence and UI socket broadcast
         if (sendResult?.key?.id) {
             try {
-                const dbSession = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
+                const dbSession = await prisma.session.findFirst({
+                    where: { OR: [{ sessionId }, { id: sessionId }] },
+                    select: { id: true }
+                });
                 if (dbSession) {
                     const saved = await prisma.message.upsert({
                         where: {
@@ -650,7 +656,10 @@ export class ChatService {
 
                 const fileUrl = `/api/media/${filename}`;
 
-                const dbSession = await prisma.session.findUnique({ where: { sessionId }, select: { id: true } });
+                const dbSession = await prisma.session.findFirst({
+                    where: { OR: [{ sessionId }, { id: sessionId }] },
+                    select: { id: true }
+                });
                 if (dbSession) {
                     const saved = await prisma.message.upsert({
                         where: {
@@ -692,4 +701,72 @@ export class ChatService {
 
         return sendResult;
     }
+
+    /**
+     * Solicit on-demand message history for a specific chat directly from the user's mobile device
+     */
+    static async syncHistoryFromDevice(sessionId: string, jid: string, count = 50) {
+        const dbSession = await prisma.session.findFirst({
+            where: { OR: [{ sessionId }, { id: sessionId }] },
+            select: { id: true, sessionId: true }
+        });
+        if (!dbSession) throw new Error("Sessão não encontrada");
+
+        const targetSessionId = dbSession.sessionId;
+        const instance = waManager.getInstance(targetSessionId);
+        if (!instance || !instance.socket || (typeof instance.isReady === "function" && !instance.isReady())) {
+            throw new Error("Instância do WhatsApp não está conectada ao dispositivo");
+        }
+
+        const candidates = AttendanceService.getJidCandidates(jid);
+        const contact = await prisma.contact.findFirst({
+            where: {
+                sessionId: dbSession.id,
+                OR: [
+                    { jid: { in: candidates } },
+                    { lid: jid },
+                    { remoteJidAlt: { in: candidates } }
+                ]
+            },
+            select: { jid: true, remoteJidAlt: true }
+        });
+
+        const queryJids = new Set([jid, ...candidates]);
+        if (contact?.jid) queryJids.add(contact.jid);
+        if (contact?.remoteJidAlt) queryJids.add(contact.remoteJidAlt);
+
+        // Find the oldest message in database for this chat to query backwards
+        const oldestMsg = await prisma.message.findFirst({
+            where: {
+                sessionId: dbSession.id,
+                remoteJid: { in: Array.from(queryJids) }
+            },
+            orderBy: { timestamp: 'asc' },
+            select: { keyId: true, fromMe: true, timestamp: true, remoteJid: true }
+        });
+
+        let targetJid = jid;
+        if (targetJid.includes('@c.us')) {
+            targetJid = targetJid.replace('@c.us', '@s.whatsapp.net');
+        }
+
+        const oldestMsgKey = oldestMsg ? {
+            remoteJid: oldestMsg.remoteJid || targetJid,
+            id: oldestMsg.keyId,
+            fromMe: oldestMsg.fromMe
+        } : {
+            remoteJid: targetJid,
+            id: '',
+            fromMe: false
+        };
+
+        const oldestTimestamp = oldestMsg
+            ? oldestMsg.timestamp.getTime()
+            : Date.now();
+
+        await (instance.socket as any).fetchMessageHistory(count, oldestMsgKey, oldestTimestamp);
+
+        return { success: true, count, oldestId: oldestMsgKey.id };
+    }
 }
+

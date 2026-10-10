@@ -42,6 +42,10 @@ export class WhatsAppInstance {
         this.io = io;
     }
 
+    isReady(): boolean {
+        return this.status === "CONNECTED" && !!this.socket;
+    }
+
     async init() {
         this.isStopped = false;
 
@@ -81,7 +85,7 @@ export class WhatsAppInstance {
             },
             browser: ["Ubuntu", "Chrome", "20.0.04"],
             markOnlineOnConnect: botConfig?.alwaysOnline ?? true,
-            syncFullHistory: true,
+            syncFullHistory: false,
             shouldSyncHistoryMessage: () => true,
             connectTimeoutMs: 60000,
             defaultQueryTimeoutMs: 60000,
@@ -260,6 +264,13 @@ export class WhatsAppInstance {
                 this.startTime = new Date();
 
                 this.io?.to(this.sessionId).emit("connection.update", { status: "CONNECTED", qr: null });
+
+                // Flush Baileys event buffer to ensure all incoming messages are dispatched immediately
+                try {
+                    this.socket?.ev.flush();
+                } catch (e) {
+                    // ignore
+                }
 
                 try {
                     await syncGroups(this.socket as WASocket, this.sessionId);

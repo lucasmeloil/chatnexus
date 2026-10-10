@@ -108,11 +108,11 @@ function LabelAssignPopover({ sessionId, jid, children }: { sessionId: string; j
                 fetch(`/api/labels/${sessionId}`),
                 fetch(`/api/labels/${sessionId}/chats?jid=${encodeURIComponent(jid)}`)
             ]);
-            const labelData = await labelRes.json();
-            const assignedData = await assignedRes.json();
+            const labelData = await labelRes.json().catch(() => null);
+            const assignedData = await assignedRes.json().catch(() => null);
 
-            if (labelRes.ok) setLabels(labelData.data?.labels || []);
-            if (assignedRes.ok) {
+            if (labelRes.ok && labelData) setLabels(labelData.data?.labels || []);
+            if (assignedRes.ok && assignedData) {
                 setAssigned(new Set((assignedData.data || []).map((cl: any) => cl.labelId)));
             }
         } catch (e) {
@@ -255,7 +255,10 @@ function ChatRow({
         avatarCheckedJids.add(chat.jid);
 
         fetch(`/api/chat/${sessionId}/${encodeURIComponent(chat.jid)}/profile-picture`)
-            .then(res => res.json())
+            .then(async res => {
+                if (!res.ok) return null;
+                return res.json().catch(() => null);
+            })
             .then(data => {
                 if (data?.profilePicUrl) {
                     window.dispatchEvent(new CustomEvent("nexus:contact-updated", {
@@ -808,7 +811,8 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
         try {
             const res = await fetch(`/api/labels/${sessionId}/chats`);
             if (!res.ok) return;
-            const data = await res.json();
+            const data = await res.json().catch(() => null);
+            if (!data?.data || !Array.isArray(data.data)) return;
             const map = new Map<string, { id: string; name: string; colorHex: string }[]>();
             for (const cl of (data.data || [])) {
                 const jid = cl.chatJid;
@@ -918,7 +922,7 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ action: "accept", jid: targetJid })
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => null);
             if (res.ok) {
                 toast.success("Atendimento aceito! Você agora é o atendente desta conversa.");
                 setChats(prev => prev.map(c => {
@@ -984,8 +988,8 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
 
             if (!targetLabelId) {
                 const res = await fetch(`/api/labels/${sessionId}`);
-                const data = await res.json();
-                const label = data.data?.labels?.find((l: any) => l.name.toLowerCase() === "finalizado");
+                const data = await res.json().catch(() => null);
+                const label = data?.data?.labels?.find((l: any) => l.name.toLowerCase() === "finalizado");
                 targetLabelId = label?.id;
             }
 

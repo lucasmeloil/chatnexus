@@ -102,6 +102,12 @@ interface IndividualClientRow {
     previewUrl?: string | null;
 }
 
+interface CsvLead {
+    phone: string;
+    company: string;
+    originalPhone: string;
+}
+
 export default function BroadcastPage() {
     const { sessionId } = useSession();
     const [activeTab, setActiveTab] = useState<"new" | "history">("new");
@@ -113,6 +119,9 @@ export default function BroadcastPage() {
     const [standardFile, setStandardFile] = useState<File | null>(null);
     const [standardPreviewUrl, setStandardPreviewUrl] = useState<string | null>(null);
     const standardFileInputRef = useRef<HTMLInputElement>(null);
+    const [csvLeads, setCsvLeads] = useState<CsvLead[]>([]);
+    const [csvFileName, setCsvFileName] = useState<string | null>(null);
+    const csvFileInputRef = useRef<HTMLInputElement>(null);
 
     // Individual Mode (Boletos & Cobrança) State
     const [sendPixSeparately, setSendPixSeparately] = useState(true);
@@ -190,6 +199,165 @@ export default function BroadcastPage() {
         if (standardFileInputRef.current) {
             standardFileInputRef.current.value = "";
         }
+    };
+
+    // Spreadsheet (CSV & Excel .xlsx / .xls) Leads Import Handlers
+    const handleSpreadsheetUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const fileNameLower = file.name.toLowerCase();
+        const isExcel = fileNameLower.endsWith(".xlsx") || fileNameLower.endsWith(".xls");
+        const isCsv = fileNameLower.endsWith(".csv") || file.type === "text/csv";
+
+        if (!isExcel && !isCsv) {
+            toast.error("Por favor, selecione um arquivo no formato .csv ou .xlsx / .xls");
+            return;
+        }
+
+        try {
+            let rows: string[][] = [];
+
+            if (isExcel) {
+                const XLSX = await import("xlsx");
+                const arrayBuffer = await file.arrayBuffer();
+                const workbook = XLSX.read(arrayBuffer, { type: "array" });
+                const firstSheetName = workbook.SheetNames[0];
+                if (!firstSheetName) {
+                    toast.error("A planilha do Excel está vazia.");
+                    return;
+                }
+                const worksheet = workbook.Sheets[firstSheetName];
+                const rawSheetData: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+                rows = rawSheetData.map(r => r.map(cell => String(cell ?? "").trim()));
+            } else {
+                const text = await file.text();
+                const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+
+                if (lines.length < 2) {
+                    toast.error("O arquivo CSV está vazio ou contém apenas o cabeçalho.");
+                    return;
+                }
+
+                // Detect delimiter (; or , or \t)
+                const headerLine = lines[0];
+                const semicolons = (headerLine.match(/;/g) || []).length;
+                const commas = (headerLine.match(/,/g) || []).length;
+                const tabs = (headerLine.match(/\t/g) || []).length;
+                const delimiter = (semicolons >= commas && semicolons >= tabs && semicolons > 0)
+                    ? ";"
+                    : (tabs >= commas && tabs > 0 ? "\t" : ",");
+
+                const parseCsvLine = (line: string): string[] => {
+                    const result: string[] = [];
+                    let current = "";
+                    let inQuotes = false;
+                    for (let i = 0; i < line.length; i++) {
+                        const char = line[i];
+                        if (char === '"') {
+                            if (inQuotes && line[i + 1] === '"') {
+                                current += '"';
+                                i++;
+                            } else {
+                                inQuotes = !inQuotes;
+                            }
+                        } else if (char === delimiter && !inQuotes) {
+                            result.push(current.trim());
+                            current = "";
+                        } else {
+                            current += char;
+                        }
+                    }
+                    result.push(current.trim());
+                    return result;
+                };
+
+                rows = lines.map(line => parseCsvLine(line));
+            }
+
+            if (rows.length < 2) {
+                toast.error("A planilha está vazia ou contém apenas o cabeçalho.");
+                return;
+            }
+
+            const headerRow = rows[0];
+            const normalizedHeaders = headerRow.map(h =>
+                h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "")
+            );
+
+            // Find phone and company index
+            let phoneIdx = normalizedHeaders.findIndex(h => /telefone|celular|whatsapp|phone|contato|fone|mobile|numero|num/.test(h));
+            let companyIdx = normalizedHeaders.findIndex(h => /empresa|company|razao|fantasia|negocio|organizacao|nomeempresa/.test(h));
+
+            if (companyIdx === -1) {
+                companyIdx = normalizedHeaders.findIndex(h => /lead|cliente|nome/.test(h));
+            }
+
+            // Fallback for phone column: inspect row 1
+            if (phoneIdx === -1 && rows.length > 1) {
+                phoneIdx = rows[1].findIndex(val => {
+                    const digits = val.replace(/\D/g, "");
+                    return digits.length >= 8 && digits.length <= 14;
+                });
+            }
+
+            if (phoneIdx === -1) {
+                toast.error("Não foi possível identificar a coluna de telefone. Verifique se o cabeçalho possui 'telefone', 'celular' ou 'whatsapp'.");
+                return;
+            }
+
+            const extractedLeads: CsvLead[] = [];
+            const phoneList: string[] = [];
+
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (row.length <= phoneIdx) continue;
+
+                const rawPhone = row[phoneIdx] || "";
+                const cleanDigits = rawPhone.replace(/\D/g, "");
+                if (cleanDigits.length < 8) continue;
+
+                const companyName = companyIdx !== -1 && row[companyIdx]
+                    ? row[companyIdx].replace(/^["']|["']$/g, "").trim()
+                    : "";
+
+                extractedLeads.push({
+                    phone: cleanDigits,
+                    originalPhone: rawPhone.trim(),
+                    company: companyName
+                });
+                phoneList.push(cleanDigits);
+            }
+
+            if (extractedLeads.length === 0) {
+                toast.error("Nenhum lead com telefone válido foi encontrado no arquivo.");
+                return;
+            }
+
+            setCsvLeads(extractedLeads);
+            setCsvFileName(file.name);
+            setContacts(phoneList.join("\n"));
+
+            const companiesCount = extractedLeads.filter(l => l.company).length;
+            if (companiesCount > 0) {
+                toast.success(`${extractedLeads.length} leads importados (${companiesCount} com nome da empresa)!`);
+            } else {
+                toast.info(`${extractedLeads.length} telefones importados. (Coluna com nome da empresa não identificada)`);
+            }
+        } catch (err) {
+            console.error("Erro ao processar planilha:", err);
+            toast.error("Erro ao ler planilha. Verifique a formatação.");
+        } finally {
+            if (csvFileInputRef.current) csvFileInputRef.current.value = "";
+        }
+    };
+
+    const handleClearCsv = () => {
+        setCsvLeads([]);
+        setCsvFileName(null);
+        setContacts("");
+        if (csvFileInputRef.current) csvFileInputRef.current.value = "";
+        toast.info("Planilha removida.");
     };
 
     // Individual Rows Actions
@@ -396,7 +564,8 @@ export default function BroadcastPage() {
 
             } else {
                 // Standard mode
-                const recipients = contacts.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map(s => {
+                const rawContactList = contacts.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+                const recipients = rawContactList.map(s => {
                     return formatToBrazilPhoneJid(s);
                 });
 
@@ -412,6 +581,33 @@ export default function BroadcastPage() {
                     return;
                 }
 
+                // Check if message has dynamic variables for CSV leads
+                const hasCompanyTag = /\[EMPRESA\]|{empresa}/i.test(message);
+                const hasPhoneTag = /\[TELEFONE\]|{telefone}/i.test(message);
+                const hasVariables = hasCompanyTag || hasPhoneTag;
+
+                let customMessages: string[] = [];
+                if (hasVariables && csvLeads.length > 0) {
+                    const companyByPhone = new Map<string, string>();
+                    csvLeads.forEach(lead => {
+                        const digits = lead.phone.replace(/\D/g, "");
+                        companyByPhone.set(digits, lead.company);
+                        if (digits.startsWith("55")) {
+                            companyByPhone.set(digits.slice(2), lead.company);
+                        } else {
+                            companyByPhone.set(`55${digits}`, lead.company);
+                        }
+                    });
+
+                    customMessages = rawContactList.map(rawPhone => {
+                        const digits = rawPhone.replace(/\D/g, "");
+                        const company = companyByPhone.get(digits) || companyByPhone.get(digits.startsWith("55") ? digits.slice(2) : `55${digits}`) || "";
+                        return message
+                            .replace(/\[EMPRESA\]|{empresa}/gi, company)
+                            .replace(/\[TELEFONE\]|{telefone}/gi, rawPhone);
+                    });
+                }
+
                 let res: Response;
 
                 if (standardFile) {
@@ -421,21 +617,29 @@ export default function BroadcastPage() {
                     formData.append("message", message.trim());
                     formData.append("delay", String(delay[0]));
                     formData.append("file", standardFile);
+                    if (customMessages.length > 0) {
+                        formData.append("customMessages", JSON.stringify(customMessages));
+                    }
 
                     res = await fetch(`/api/messages/${sessionId}/broadcast`, {
                         method: "POST",
                         body: formData
                     });
                 } else {
+                    const bodyPayload: any = {
+                        mode: "standard",
+                        recipients,
+                        message: message.trim(),
+                        delay: delay[0]
+                    };
+                    if (customMessages.length > 0) {
+                        bodyPayload.customMessages = customMessages;
+                    }
+
                     res = await fetch(`/api/messages/${sessionId}/broadcast`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            mode: "standard",
-                            recipients,
-                            message: message.trim(),
-                            delay: delay[0]
-                        })
+                        body: JSON.stringify(bodyPayload)
                     });
                 }
 
@@ -872,18 +1076,68 @@ export default function BroadcastPage() {
                             <div className="grid gap-6 grid-cols-1 lg:grid-cols-12">
                                 {/* Recipients Card (5 Cols) */}
                                 <Card className="lg:col-span-5 shadow-xs border-border/70">
-                                    <CardHeader>
-                                        <CardTitle className="text-base font-bold">Destinatários</CardTitle>
-                                        <CardDescription className="text-xs">
-                                            Insira os números de telefone separados por linha ou vírgula.
-                                        </CardDescription>
+                                    <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-3">
+                                        <div>
+                                            <CardTitle className="text-base font-bold">Destinatários</CardTitle>
+                                            <CardDescription className="text-xs">
+                                                Insira os números ou importe uma planilha em CSV ou Excel (.xlsx).
+                                            </CardDescription>
+                                        </div>
+                                        <div>
+                                            <input
+                                                ref={csvFileInputRef}
+                                                type="file"
+                                                accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                                                className="hidden"
+                                                onChange={handleSpreadsheetUpload}
+                                                disabled={loading}
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => csvFileInputRef.current?.click()}
+                                                className="h-8 text-xs gap-1.5 cursor-pointer font-semibold border-primary/30 text-primary hover:bg-primary/10"
+                                                disabled={loading}
+                                            >
+                                                <FileSpreadsheet className="h-3.5 w-3.5" /> Importar CSV / Excel
+                                            </Button>
+                                        </div>
                                     </CardHeader>
                                     <CardContent className="space-y-4">
+                                        {/* CSV Active Banner */}
+                                        {csvLeads.length > 0 && (
+                                            <div className="p-3 rounded-xl border border-primary/25 bg-primary/5 space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <FileSpreadsheet className="h-4 w-4 text-primary shrink-0" />
+                                                        <span className="text-xs font-bold text-foreground truncate max-w-[170px]" title={csvFileName || ""}>
+                                                            {csvFileName || "leads.csv"}
+                                                        </span>
+                                                        <Badge variant="secondary" className="text-[10px] bg-primary/20 text-primary font-bold shrink-0">
+                                                            {csvLeads.length} leads
+                                                        </Badge>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleClearCsv}
+                                                        className="text-muted-foreground hover:text-red-500 p-0.5 cursor-pointer"
+                                                        title="Remover planilha CSV"
+                                                    >
+                                                        <X className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </div>
+                                                <p className="text-[11px] text-muted-foreground leading-tight">
+                                                    {csvLeads.filter(l => l.company).length} com empresa identificada. Use <code className="bg-primary/10 text-primary px-1 py-0.5 rounded font-mono font-semibold">*[EMPRESA]*</code> na mensagem para personalizar o envio.
+                                                </p>
+                                            </div>
+                                        )}
+
                                         <div className="space-y-2">
                                             <Label className="text-xs font-semibold">Números de Destino</Label>
                                             <Textarea
                                                 placeholder={"11987654321\n(11) 91234-5678\n552199887766"}
-                                                className="min-h-[220px] font-mono text-xs leading-relaxed"
+                                                className="min-h-[200px] font-mono text-xs leading-relaxed"
                                                 value={contacts}
                                                 onChange={e => setContacts(e.target.value)}
                                                 disabled={loading}
@@ -998,16 +1252,46 @@ export default function BroadcastPage() {
 
                                         {/* Message Textarea */}
                                         <div className="space-y-2">
-                                            <Label className="text-xs font-semibold">
-                                                {standardFile ? "Legenda do Arquivo" : "Mensagem de Texto"}
-                                            </Label>
+                                            <div className="flex items-center justify-between flex-wrap gap-2">
+                                                <Label className="text-xs font-semibold">
+                                                    {standardFile ? "Legenda do Arquivo / Imagem" : "Mensagem de Texto"}
+                                                </Label>
+                                                {csvLeads.length > 0 && (
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span className="text-[10px] text-muted-foreground font-medium">Inserir:</span>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setMessage(prev => prev + (prev.endsWith(" ") || !prev ? "" : " ") + "*[EMPRESA]*")}
+                                                            className="h-6 text-[10px] px-2 gap-1 cursor-pointer font-medium"
+                                                        >
+                                                            + Empresa (*&#91;EMPRESA&#93;*)
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setMessage(prev => prev + (prev.endsWith(" ") || !prev ? "" : " ") + "*[TELEFONE]*")}
+                                                            className="h-6 text-[10px] px-2 gap-1 cursor-pointer font-medium"
+                                                        >
+                                                            + Telefone (*&#91;TELEFONE&#93;*)
+                                                        </Button>
+                                                    </div>
+                                                )}
+                                            </div>
                                             <Textarea
-                                                placeholder={standardFile ? "Digite uma legenda para acompanhar o arquivo (opcional)..." : "Digite a mensagem do disparo aqui..."}
+                                                placeholder={standardFile ? "Digite uma legenda para a imagem (ex: Olá equipe da [EMPRESA], segue nossa proposta...)..." : "Digite a mensagem do disparo aqui..."}
                                                 className="min-h-[120px] text-sm leading-relaxed"
                                                 value={message}
                                                 onChange={e => setMessage(e.target.value)}
                                                 disabled={loading}
                                             />
+                                            {csvLeads.length > 0 && (
+                                                <p className="text-[11px] text-muted-foreground">
+                                                    A tag <code className="bg-muted px-1.5 py-0.5 rounded font-mono text-[10px] text-primary font-semibold">*&#91;EMPRESA&#93;*</code> será substituída pelo nome da empresa de cada lead importado da planilha.
+                                                </p>
+                                            )}
                                         </div>
 
                                         {/* Delay & Send */}
