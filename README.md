@@ -27,6 +27,7 @@
 - [Módulos em Detalhes](#-módulos-em-detalhes)
 - [Webhooks e Integração n8n](#-webhooks-e-integração-n8n)
 - [Documentação OpenAPI / Swagger](#-documentação-openapi--swagger)
+- [Guia de Hospedagem na Oracle Cloud & Conexão de Domínio](#-guia-de-hospedagem-na-oracle-cloud--conexão-de-domínio)
 - [Diretrizes de Manutenção](#-diretrizes-de-manutenção)
 
 ---
@@ -233,6 +234,144 @@ O NEXUS Chat suporta envio de webhooks em tempo real para automações externas.
 O sistema inclui documentação interativa completa de todas as rotas da API em `/docs`.
 - **Acesso**: Navegue até [http://localhost:3000/docs](http://localhost:3000/docs)
 - **Autenticação da API**: As rotas protegidas utilizam cabeçalho `Authorization: Bearer <API_KEY>` ou sessão autenticada.
+
+---
+
+## 🌐 Guia de Hospedagem na Oracle Cloud & Conexão de Domínio
+
+Esta seção registra toda a infraestrutura provisionada e o roteiro exato para quando for conectar o domínio corporativo com SSL (HTTPS).
+
+### 📍 Informações da Instância Provisionada (Oracle Cloud)
+- **Região**: Brasil Leste (São Paulo - `sa-saopaulo-1`)
+- **Instância**: `nexus-chat-server` (Always Free)
+- **Sistema Operacional**: Ubuntu 22.04 LTS
+- **IP Público da VPS**: `163.176.47.244`
+- **Usuário SSH**: `ubuntu`
+- **Chave SSH Local (Windows)**: `C:\Users\nexus\Downloads\ssh-key-2026-10-11.key`
+- **Portas Liberadas (VCN Ingress Rules & iptables)**: `22` (SSH), `80` (HTTP), `443` (HTTPS), `3000` (Node/Next.js)
+- **Banco de Dados**: MySQL 8.0 local (`nexus_chat`) com plugin `mysql_native_password`
+- **Gerenciador de Processos**: PM2 (`nexus-chat`, startup configurado via systemd)
+
+---
+
+### 💻 Conexão e Manutenção Básica
+
+#### 1. Conectar via SSH pelo Windows (PowerShell):
+```powershell
+ssh -i "C:\Users\nexus\Downloads\ssh-key-2026-10-11.key" ubuntu@163.176.47.244
+```
+
+#### 2. Comandos Operacionais no Servidor:
+```bash
+# Ver status do processo
+pm2 status
+
+# Ver logs em tempo real
+pm2 logs nexus-chat
+
+# Reiniciar o serviço após alterações
+pm2 restart nexus-chat
+
+# Parar ou Iniciar
+pm2 stop nexus-chat
+pm2 start nexus-chat
+```
+
+---
+
+### 🌍 Roteiro Passo a Passo para Conectar o Domínio (ex: `chat.nexussofttech.com.br`)
+
+Quando você adquirir ou for vincular o domínio/subdomínio, siga os passos abaixo:
+
+#### Passo 1: Apontamento no Painel de DNS
+No painel do seu registrador de domínio (Cloudflare, Registro.br, GoDaddy, Hostgator, etc.):
+- Crie uma entrada do **Tipo A**:
+  - **Nome/Host**: `chat` (ou `@` se for domínio raiz)
+  - **Tipo**: `A`
+  - **Destino/IP**: `163.176.47.244`
+  - **TTL**: Automático / 1 hora
+
+---
+
+#### Passo 2: Atualizar as Variáveis no `.env` do Servidor
+Conecte na VPS e edite o arquivo `.env` para usar a URL do seu domínio com HTTPS:
+```bash
+cd ~/nexus-chat
+nano .env
+```
+Altere as seguintes variáveis (substituindo pelo seu domínio real):
+```env
+BASE_URL="https://chat.seudominio.com.br"
+NEXTAUTH_URL="https://chat.seudominio.com.br"
+NEXT_PUBLIC_APP_URL="https://chat.seudominio.com.br"
+NEXT_PUBLIC_API_URL="https://chat.seudominio.com.br/api"
+AUTH_TRUST_HOST="true"
+```
+*(Pressione `Ctrl + O` e Enter para salvar, depois `Ctrl + X` para sair).*
+
+---
+
+#### Passo 3: Instalar Nginx e Certbot (SSL Gratuito) na VPS
+Execute no terminal da VPS:
+```bash
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx
+```
+
+---
+
+#### Passo 4: Configurar o Proxy Reverso no Nginx
+Crie a configuração do site no Nginx com suporte a WebSockets/Socket.IO e uploads de mídia:
+```bash
+sudo nano /etc/nginx/sites-available/nexus-chat
+```
+Cole o seguinte conteúdo (ajustando `chat.seudominio.com.br`):
+```nginx
+server {
+    listen 80;
+    server_name chat.seudominio.com.br;
+
+    client_max_body_size 100M;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+Ative a configuração e recarregue o Nginx:
+```bash
+sudo ln -sf /etc/nginx/sites-available/nexus-chat /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+---
+
+#### Passo 5: Gerar Certificado SSL Gratuito (HTTPS)
+Execute o Certbot para obter e instalar o certificado Let's Encrypt automaticamente:
+```bash
+sudo certbot --nginx -d chat.seudominio.com.br
+```
+*(Informe seu e-mail quando solicitado e aceite os termos. O Certbot configurará a renovação automática).*
+
+---
+
+#### Passo 6: Reiniciar a Aplicação
+```bash
+cd ~/nexus-chat
+pm2 restart nexus-chat
+```
+Pronto! A plataforma estará acessível com cadeado de segurança em:
+👉 **`https://chat.seudominio.com.br`**
 
 ---
 
