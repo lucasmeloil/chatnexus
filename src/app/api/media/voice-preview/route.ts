@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
 
         const processedBuffer = await convertToOggOpus(inputBuffer, validProfile);
 
-        return new Response(processedBuffer, {
+        return new Response(new Uint8Array(processedBuffer), {
             status: 200,
             headers: {
                 "Content-Type": "audio/ogg; codecs=opus",
