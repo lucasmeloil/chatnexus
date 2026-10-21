@@ -201,7 +201,7 @@ function renderFormattedContent(content: string) {
 }
 
 function handleDownload(url: string, fileName: string) {
-    toast.info("Downloading...");
+    toast.info("Baixando...");
     fetch(url).then(res => { if (!res.ok) throw new Error(); return res.blob(); }).then(blob => {
         const dlUrl = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -209,7 +209,7 @@ function handleDownload(url: string, fileName: string) {
         document.body.appendChild(link);
         link.click(); link.remove();
         window.URL.revokeObjectURL(dlUrl);
-    }).catch(() => toast.error("Download failed!"));
+    }).catch(() => toast.error("Falha no download!"));
 }
 
 // ─── Context Menu ──────────────────
@@ -229,13 +229,13 @@ function ContextMenu({ state, onClose, onReply, onDelete, onEdit }: { state: Con
     }, [onClose]);
 
     const items = [
-        { label: "Reply", icon: CornerUpLeft, action: () => { onReply(state.msg); onClose(); } },
+        { label: "Responder", icon: CornerUpLeft, action: () => { onReply(state.msg); onClose(); } },
         ...(state.msg.fromMe && state.msg.type === 'TEXT' && !state.msg.isDeleted && onEdit ? [
             { label: "Editar", icon: Pencil, action: () => { onEdit(state.msg); onClose(); } }
         ] : []),
-        { label: "Copy", icon: Copy, action: () => { navigator.clipboard.writeText(state.msg.content || "").then(() => toast.success("Copied!")).catch(() => { }); onClose(); } },
-        { label: "Delete", icon: Trash2, action: () => { onDelete(state.msg); onClose(); }, dangerous: true },
-        { label: "Info", icon: Info, action: () => { toast.info(`ID: ${state.msg.keyId}\nStatus: ${state.msg.status}\nTime: ${new Date(state.msg.timestamp).toLocaleString()}`); onClose(); } },
+        { label: "Copiar", icon: Copy, action: () => { navigator.clipboard.writeText(state.msg.content || "").then(() => toast.success("Copiado!")).catch(() => { }); onClose(); } },
+        { label: "Excluir", icon: Trash2, action: () => { onDelete(state.msg); onClose(); }, dangerous: true },
+        { label: "Informações", icon: Info, action: () => { toast.info(`ID: ${state.msg.keyId}\nStatus: ${state.msg.status}\nHora: ${new Date(state.msg.timestamp).toLocaleString()}`); onClose(); } },
     ];
 
     // Adjust position to not overflow viewport
@@ -1102,8 +1102,8 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
             }
             // ? : show shortcuts
             if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.shiftKey && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
-                toast.success("Shortcuts", {
-                    description: "Enter: Send\nShift+Enter: New line\nEsc: Cancel reply\n?: Show this help"
+                toast.success("Atalhos do Teclado", {
+                    description: "Enter: Enviar mensagem\nShift+Enter: Nova linha\nEsc: Cancelar resposta\n?: Exibir esta ajuda"
                 });
             }
         };
@@ -1688,6 +1688,19 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                 <span className="hidden sm:inline">Finalizar Atendimento</span>
                             </Button>
                         )
+                    )}
+
+                    {onBack && (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={onBack}
+                            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/80 cursor-pointer transition-colors shrink-0"
+                            title="Fechar conversa"
+                        >
+                            <X className="h-4 w-4" />
+                        </Button>
                     )}
                 </div>
             </div>

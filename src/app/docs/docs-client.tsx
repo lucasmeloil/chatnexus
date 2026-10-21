@@ -31,12 +31,12 @@ function CopyButton({ code }: { code: string }) {
         navigator.clipboard.writeText(code).then(() => {
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
-        }).catch(() => toast.error("Copy failed"));
+        }).catch(() => toast.error("Falha ao copiar"));
     }, [code]);
     return (
         <button onClick={handleCopy} className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
             {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-            {copied ? "Copied!" : "Copy"}
+            {copied ? "Copiado!" : "Copiar"}
         </button>
     );
 }
@@ -149,7 +149,7 @@ export function DocsClient({ content, toc }: DocsClientProps) {
                         </button>
                     ))}
                     {section.items.length === 0 && (
-                        <p className="text-xs text-gray-300 italic px-2 py-1">No subsections</p>
+                        <p className="text-xs text-gray-300 italic px-2 py-1">Sem subseções</p>
                     )}
                 </div>
             )}
@@ -171,7 +171,7 @@ export function DocsClient({ content, toc }: DocsClientProps) {
                     />
                 ))
             ) : (
-                <p className="text-sm text-gray-400 text-center py-4">No results found</p>
+                <p className="text-sm text-gray-400 text-center py-4">Nenhum resultado encontrado</p>
             )}
         </nav>
     );
@@ -184,7 +184,7 @@ export function DocsClient({ content, toc }: DocsClientProps) {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <input
                         type="text"
-                        placeholder="Filter documentation..."
+                        placeholder="Filtrar documentação..."
                         className="w-full pl-9 pr-4 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-gray-400"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
@@ -203,15 +203,15 @@ export function DocsClient({ content, toc }: DocsClientProps) {
                     </SheetTrigger>
                     <SheetContent side="left" className="w-[85vw] sm:w-[400px] p-0 flex flex-col"> {/* Adjusted width for mobile */}
                         <div className="p-6 border-b bg-gray-50/50">
-                            <h2 className="text-lg font-bold text-gray-900">Documentation</h2>
-                            <p className="text-xs text-gray-500 mt-1">Navigate through sections</p>
+                            <h2 className="text-lg font-bold text-gray-900">Documentação</h2>
+                            <p className="text-xs text-gray-500 mt-1">Navegue pelas seções</p>
                         </div>
                         <div className="p-4 flex-1 overflow-y-auto overscroll-contain"> {/* Added overscroll-contain */}
                             <div className="mb-6 relative">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                                 <input
                                     type="text"
-                                    placeholder="Search topic..."
+                                    placeholder="Buscar tópico..."
                                     className="w-full pl-9 pr-4 py-3 text-base bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" // Larger text/padding for mobile
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
@@ -234,7 +234,7 @@ export function DocsClient({ content, toc }: DocsClientProps) {
                         </div>
                         <div className="ml-3">
                             <p className="text-sm text-blue-700">
-                                For the most up-to-date API reference and interactive testing, please check the <Link href="/swagger" className="font-medium underline hover:text-blue-600">Swagger UI</Link> or the <Link href="/dashboard/api-docs" className="font-medium underline hover:text-blue-600">Dashboard API Docs</Link>.
+                                Para obter a referência de API mais atualizada e testes interativos, consulte o <Link href="/swagger" className="font-medium underline hover:text-blue-600">Swagger UI</Link> ou a <Link href="/dashboard/api-docs" className="font-medium underline hover:text-blue-600">Documentação da API do Painel</Link>.
                             </p>
                         </div>
                     </div>

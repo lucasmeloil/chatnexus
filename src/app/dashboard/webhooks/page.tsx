@@ -59,16 +59,16 @@ interface WebhookLog {
 }
 
 const AVAILABLE_EVENTS = [
-    { id: "message.received", label: "Message Received", description: "When a new message is received" },
-    { id: "message.sent", label: "Message Sent", description: "When a message is sent" },
-    { id: "message.status", label: "Message Status", description: "When message status changes (delivered, read)" },
-    { id: "connection.update", label: "Connection Update", description: "When session connects/disconnects" },
-    { id: "group.update", label: "Group Update", description: "When group info changes" },
-    { id: "group.participant", label: "Group Member", description: "When participants join, leave, or change roles" },
-    { id: "contact.update", label: "Contact Update", description: "When contact info changes" },
-    { id: "status.update", label: "Status/Story", description: "When a status is posted or viewed" },
-    { id: "message.edited", label: "Message Edited", description: "When a message is edited" },
-    { id: "message.deleted", label: "Message Deleted", description: "When a message is revoked/deleted" },
+    { id: "message.received", label: "Mensagem Recebida", description: "Quando uma nova mensagem é recebida" },
+    { id: "message.sent", label: "Mensagem Enviada", description: "Quando uma mensagem é enviada com sucesso" },
+    { id: "message.status", label: "Status da Mensagem", description: "Quando o status da mensagem muda (entregue, lida)" },
+    { id: "connection.update", label: "Atualização de Conexão", description: "Quando a sessão conecta ou desconecta" },
+    { id: "group.update", label: "Atualização de Grupo", description: "Quando as informações do grupo mudam" },
+    { id: "group.participant", label: "Membro de Grupo", description: "Quando participantes entram, saem ou mudam cargos" },
+    { id: "contact.update", label: "Atualização de Contato", description: "Quando os dados de um contato são alterados" },
+    { id: "status.update", label: "Status / Stories", description: "Quando um status é publicado ou visualizado" },
+    { id: "message.edited", label: "Mensagem Editada", description: "Quando uma mensagem é editada" },
+    { id: "message.deleted", label: "Mensagem Apagada", description: "Quando uma mensagem é revogada/apagada" },
 ];
 
 import { useSession } from "@/components/dashboard/session-provider";
@@ -417,7 +417,7 @@ export default function WebhooksPage() {
                                     <Webhook className="h-5 w-5" /> Webhooks
                                 </CardTitle>
                                 <CardDescription>
-                                    Send real-time events to external URLs when activities happen in WhatsApp.
+                                    Envie eventos em tempo real para URLs externas quando ocorrerem atividades no WhatsApp.
                                 </CardDescription>
                             </div>
                             <Button onClick={() => {
@@ -427,31 +427,31 @@ export default function WebhooksPage() {
                                 setNewEvents(["message.received", "message.sent"]);
                                 setShowNewForm(!showNewForm);
                             }}>
-                                <Plus className="h-4 w-4 mr-2" /> Add Webhook
+                                <Plus className="h-4 w-4 mr-2" /> Adicionar Webhook
                             </Button>
                         </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {showNewForm && (
                             <Card className="border-dashed border-2">
-                                <CardHeader><CardTitle>New Webhook</CardTitle></CardHeader>
+                                <CardHeader><CardTitle>Novo Webhook</CardTitle></CardHeader>
                                 <CardContent className="pt-4 space-y-4">
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-2">
-                                            <Label>Name</Label>
-                                            <Input placeholder="My Server" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                                            <Label>Nome</Label>
+                                            <Input placeholder="Ex: Meu Servidor" value={newName} onChange={(e) => setNewName(e.target.value)} />
                                         </div>
                                         <div className="space-y-2">
-                                            <Label>Webhook URL</Label>
-                                            <Input placeholder="https://example.com/webhook" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} />
+                                            <Label>URL do Webhook</Label>
+                                            <Input placeholder="https://exemplo.com/webhook" value={newUrl} onChange={(e) => setNewUrl(e.target.value)} />
                                         </div>
                                     </div>
                                     <div className="space-y-2">
-                                        <Label>Secret (optional, for HMAC signature)</Label>
-                                        <Input placeholder="your-secret-key" value={newSecret} onChange={(e) => setNewSecret(e.target.value)} />
+                                        <Label>Segredo (opcional, para assinatura HMAC)</Label>
+                                        <Input placeholder="sua-chave-secreta" value={newSecret} onChange={(e) => setNewSecret(e.target.value)} />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label>Events</Label>
+                                        <Label>Eventos</Label>
                                         <div className="grid grid-cols-2 gap-2">
                                             {AVAILABLE_EVENTS.map(event => (
                                                 <div key={event.id} className="flex items-center gap-2 p-2 rounded border">
@@ -600,26 +600,26 @@ export default function WebhooksPage() {
             <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>Edit Webhook</DialogTitle>
-                        <DialogDescription>Modify the webhook endpoint configuration and subscribed events.</DialogDescription>
+                        <DialogTitle>Editar Webhook</DialogTitle>
+                        <DialogDescription>Modifique as configurações de destino e eventos inscritos do webhook.</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label>Name</Label>
-                                <Input placeholder="My Server" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                                <Label>Nome</Label>
+                                <Input placeholder="Ex: Meu Servidor" value={editName} onChange={(e) => setEditName(e.target.value)} />
                             </div>
                             <div className="space-y-2">
-                                <Label>Webhook URL</Label>
-                                <Input placeholder="https://example.com/webhook" value={editUrl} onChange={(e) => setEditUrl(e.target.value)} />
+                                <Label>URL do Webhook</Label>
+                                <Input placeholder="https://exemplo.com/webhook" value={editUrl} onChange={(e) => setEditUrl(e.target.value)} />
                             </div>
                         </div>
                         <div className="space-y-2">
-                            <Label>Secret (optional, for HMAC signature)</Label>
-                            <Input placeholder="your-secret-key" value={editSecret} onChange={(e) => setEditSecret(e.target.value)} />
+                            <Label>Segredo (opcional, para assinatura HMAC)</Label>
+                            <Input placeholder="sua-chave-secreta" value={editSecret} onChange={(e) => setEditSecret(e.target.value)} />
                         </div>
                         <div className="space-y-2">
-                            <Label>Events</Label>
+                            <Label>Eventos</Label>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 {AVAILABLE_EVENTS.map(event => (
                                     <div key={event.id} className="flex items-center gap-2 p-2 rounded border">
@@ -640,8 +640,8 @@ export default function WebhooksPage() {
                         </div>
                     </div>
                     <DialogFooter className="gap-2">
-                        <Button variant="ghost" onClick={() => setIsEditOpen(false)}>Cancel</Button>
-                        <Button onClick={handleUpdateWebhook}>Save Changes</Button>
+                        <Button variant="ghost" onClick={() => setIsEditOpen(false)}>Cancelar</Button>
+                        <Button onClick={handleUpdateWebhook}>Salvar Alterações</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
