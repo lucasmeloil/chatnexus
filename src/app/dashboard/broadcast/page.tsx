@@ -1318,47 +1318,55 @@ export default function BroadcastPage() {
                 {activeTab === "new" && (
                     <>
                         {/* Mode Selector Segmented Control */}
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
-                            <div>
-                                <h4 className="text-xs font-bold text-foreground">Modalidade de Envio</h4>
-                                <p className="text-[11px] text-muted-foreground">
-                                    Escolha entre envio individualizado de boletos, disparos coletivos de cobrança, ou campanhas de prospecção para leads.
-                                </p>
+                        <div className="p-4 rounded-2xl bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                                <div>
+                                    <h4 className="text-xs font-bold text-foreground">Modalidade de Envio</h4>
+                                    <p className="text-[11px] text-muted-foreground">
+                                        Escolha o formato de disparo ideal para o seu fluxo de mensagens:
+                                    </p>
+                                </div>
+                                <span className="text-[10px] text-muted-foreground font-medium bg-background/80 px-2.5 py-1 rounded-full border border-border/40 w-fit">
+                                    3 modalidades disponíveis
+                                </span>
                             </div>
 
-                            <div className="flex gap-1.5 bg-background p-1 rounded-xl border shadow-2xs flex-wrap">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 bg-background p-1.5 rounded-xl border shadow-2xs">
                                 <button
                                     type="button"
                                     onClick={() => setBroadcastMode("individual")}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer ${
                                         broadcastMode === "individual"
                                             ? "bg-primary text-primary-foreground shadow-xs"
-                                            : "text-muted-foreground hover:text-foreground"
+                                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                                     }`}
                                 >
-                                    <Receipt className="h-3.5 w-3.5" /> Boletos & Pix Individuais
+                                    <Receipt className="h-4 w-4 shrink-0" />
+                                    <span className="truncate">Boletos & Pix Individuais</span>
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setBroadcastMode("standard")}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer ${
                                         broadcastMode === "standard"
                                             ? "bg-primary text-primary-foreground shadow-xs"
-                                            : "text-muted-foreground hover:text-foreground"
+                                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                                     }`}
                                 >
-                                    <Users className="h-3.5 w-3.5" /> Disparo Coletivo & Cobranças
+                                    <Users className="h-4 w-4 shrink-0" />
+                                    <span className="truncate">Disparo Coletivo & Cobranças</span>
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setBroadcastMode("leads")}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                    className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer ${
                                         broadcastMode === "leads"
                                             ? "bg-primary text-primary-foreground shadow-xs"
-                                            : "text-muted-foreground hover:text-foreground"
+                                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                                     }`}
                                 >
-                                    <Megaphone className="h-3.5 w-3.5" /> Campanhas & Prospecção de Leads
+                                    <Megaphone className="h-4 w-4 shrink-0 text-amber-500" />
+                                    <span className="truncate">Campanhas & Prospecção de Leads</span>
                                 </button>
                             </div>
                         </div>

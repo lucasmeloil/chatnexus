@@ -16,7 +16,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { RefreshCw, Save, AlertCircle, Bot, X, Plus, ShieldCheck, Zap, UserCheck, MessageSquarePlus } from "lucide-react";
+import { RefreshCw, Save, AlertCircle, Bot, X, Plus, ShieldCheck, Zap, UserCheck, MessageSquarePlus, FileJson, Upload, Trash2, Mic, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { SessionGuard } from "@/components/dashboard/session-guard";
 import { formatToBrazilPhoneJid } from "@/lib/jid-utils";
@@ -25,6 +25,7 @@ export default function BotSettingsPage() {
     const { sessionId } = useSessionProvider();
 
     const [botConfig, setBotConfig] = useState({
+        enabled: true,
         botName: "WA-AKG Bot",
         prefix: "#",
         enableSticker: true,
@@ -61,8 +62,41 @@ export default function BotSettingsPage() {
     });
     const [privacyLoading, setPrivacyLoading] = useState(false);
 
+    // Typebot State
+    const [typebotConfig, setTypebotConfig] = useState({
+        enabled: true,
+        transcribeAudio: false,
+        openaiApiKey: "",
+        handoverKeywords: "atendente, humano, suporte, sair",
+        delayBetweenMessages: 1200,
+    });
+    const [typebotSummary, setTypebotSummary] = useState<{
+        hasFlow: boolean;
+        flowName?: string;
+        groupsCount?: number;
+        blocksCount?: number;
+        updatedAt?: string;
+    } | null>(null);
+    const [typebotLoading, setTypebotLoading] = useState(false);
+    const [uploadingJson, setUploadingJson] = useState(false);
+
+    const loadTypebot = () => {
+        if (!sessionId) return;
+        fetch(`/api/sessions/${sessionId}/typebot`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.status) {
+                    if (data.config) setTypebotConfig(data.config);
+                    if (data.summary) setTypebotSummary(data.summary);
+                }
+            })
+            .catch(() => { });
+    };
+
     useEffect(() => {
         if (!sessionId) return;
+
+        loadTypebot();
 
         fetch(`/api/sessions/${sessionId}/bot-config`)
             .then(res => { if (!res.ok) throw new Error(); return res.json(); })
@@ -72,6 +106,7 @@ export default function BotSettingsPage() {
                     setBotConfig(prev => ({
                         ...prev,
                         ...data,
+                        enabled: data.enabled ?? true,
                         removeBgApiKey: data.removeBgApiKey || "",
                         prefix: data.prefix || "#",
                         welcomeMessage: data.welcomeMessage || "",
@@ -171,6 +206,78 @@ export default function BotSettingsPage() {
         }));
     };
 
+    const handleUploadTypebotJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !sessionId) return;
+
+        if (!file.name.endsWith('.json')) {
+            toast.error("Por favor, selecione um arquivo .json válido exportado do Typebot");
+            return;
+        }
+
+        setUploadingJson(true);
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const res = await fetch(`/api/sessions/${sessionId}/typebot`, {
+                method: "POST",
+                body: formData
+            });
+            const data = await res.json();
+            if (data.status) {
+                toast.success(data.message || "Fluxo Typebot importado com sucesso!");
+                if (data.summary) setTypebotSummary(data.summary);
+            } else {
+                toast.error(data.message || "Falha ao importar fluxo Typebot");
+            }
+        } catch (err: any) {
+            toast.error("Erro ao enviar arquivo: " + err.message);
+        } finally {
+            setUploadingJson(false);
+            e.target.value = "";
+        }
+    };
+
+    const handleSaveTypebotConfig = async () => {
+        if (!sessionId) return;
+        setTypebotLoading(true);
+        try {
+            const res = await fetch(`/api/sessions/${sessionId}/typebot`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(typebotConfig)
+            });
+            const data = await res.json();
+            if (data.status) {
+                toast.success("Configurações do Typebot salvas com sucesso!");
+            } else {
+                toast.error(data.message || "Falha ao salvar configurações");
+            }
+        } catch (err: any) {
+            toast.error("Erro ao salvar: " + err.message);
+        } finally {
+            setTypebotLoading(false);
+        }
+    };
+
+    const handleDeleteTypebotFlow = async () => {
+        if (!sessionId) return;
+        if (!confirm("Deseja realmente remover o fluxo do Typebot desta sessão?")) return;
+        try {
+            const res = await fetch(`/api/sessions/${sessionId}/typebot`, {
+                method: "DELETE"
+            });
+            const data = await res.json();
+            if (data.status) {
+                toast.success("Fluxo Typebot removido com sucesso");
+                setTypebotSummary({ hasFlow: false });
+            }
+        } catch (err: any) {
+            toast.error("Erro ao remover fluxo");
+        }
+    };
+
     const inputClass = "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
     return (
@@ -180,6 +287,191 @@ export default function BotSettingsPage() {
                     <h2 className="text-xl sm:text-3xl font-bold tracking-tight">Configurações do Bot</h2>
                     <p className="text-muted-foreground text-sm mt-1">Configure os recursos do robô e privacidade da sessão ativa do WhatsApp.</p>
                 </div>
+
+                {/* Master Switch: Ativar / Desativar Robô */}
+                <Card className={`border-2 transition-all ${botConfig.enabled ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-muted/20'}`}>
+                    <CardContent className="p-6">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                            <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                    <Bot className={`h-6 w-6 ${botConfig.enabled ? 'text-primary' : 'text-muted-foreground'}`} />
+                                    <h3 className="text-lg font-bold">
+                                        Status Geral do Robô: {botConfig.enabled ? (
+                                            <span className="text-emerald-500 font-semibold">ATIVO</span>
+                                        ) : (
+                                            <span className="text-muted-foreground font-semibold">DESATIVADO</span>
+                                        )}
+                                    </h3>
+                                </div>
+                                <p className="text-xs sm:text-sm text-muted-foreground">
+                                    {botConfig.enabled
+                                        ? "O robô está respondendo automaticamente no WhatsApp (Typebot e Autorespostas)."
+                                        : "O robô está desligado e não enviará respostas automáticas para nenhum contato."}
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <Label htmlFor="master-bot-switch" className="text-sm font-semibold cursor-pointer">
+                                    {botConfig.enabled ? "Robô Ligado" : "Robô Desligado"}
+                                </Label>
+                                <Switch
+                                    id="master-bot-switch"
+                                    checked={botConfig.enabled}
+                                    onCheckedChange={async (val) => {
+                                        const updated = { ...botConfig, enabled: val };
+                                        setBotConfig(updated);
+                                        if (sessionId) {
+                                            try {
+                                                await fetch(`/api/sessions/${sessionId}/bot-config`, {
+                                                    method: "POST",
+                                                    headers: { "Content-Type": "application/json" },
+                                                    body: JSON.stringify(updated)
+                                                });
+                                                toast.success(val ? "Robô ativado com sucesso!" : "Robô desativado com sucesso!");
+                                            } catch {
+                                                toast.error("Erro ao alternar status do robô");
+                                            }
+                                        }
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Typebot Integration Card */}
+                <Card className="border-purple-500/30">
+                    <CardHeader>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                                <CardTitle className="flex items-center gap-2">
+                                    <Sparkles className="h-5 w-5 text-purple-500" />
+                                    Automação com Typebot (Fluxo Visual)
+                                </CardTitle>
+                                <CardDescription>
+                                    Importe o arquivo <code>.json</code> exportado do Typebot para atendimento automático completo com suporte a texto e áudio.
+                                </CardDescription>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Label htmlFor="typebot-enable-switch" className="text-xs font-semibold cursor-pointer">
+                                    {typebotConfig.enabled ? "Typebot Ativo" : "Typebot Inativo"}
+                                </Label>
+                                <Switch
+                                    id="typebot-enable-switch"
+                                    checked={typebotConfig.enabled}
+                                    onCheckedChange={v => setTypebotConfig(prev => ({ ...prev, enabled: v }))}
+                                />
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        {/* Status / Flow Card */}
+                        {typebotSummary?.hasFlow ? (
+                            <div className="p-4 rounded-xl border border-purple-500/30 bg-purple-500/5 space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-10 w-10 rounded-lg bg-purple-500/20 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold">
+                                            <FileJson className="h-5 w-5" />
+                                        </div>
+                                        <div>
+                                            <h4 className="font-semibold text-sm flex items-center gap-2">
+                                                {typebotSummary.flowName || "Fluxo Typebot Carregado"}
+                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 font-semibold">Ativo</span>
+                                            </h4>
+                                            <p className="text-xs text-muted-foreground">
+                                                {typebotSummary.groupsCount || 0} Grupos • {typebotSummary.blocksCount || 0} Blocos de Ação e Mensagens
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground">
+                                            <Upload className="h-3.5 w-3.5" />
+                                            Substituir .json
+                                            <input type="file" accept=".json" className="hidden" onChange={handleUploadTypebotJson} disabled={uploadingJson} />
+                                        </label>
+                                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={handleDeleteTypebotFlow}>
+                                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                            Remover
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="p-6 rounded-xl border-2 border-dashed border-border/80 flex flex-col items-center justify-center text-center space-y-3">
+                                <div className="h-12 w-12 rounded-full bg-purple-500/10 text-purple-500 flex items-center justify-center">
+                                    <FileJson className="h-6 w-6" />
+                                </div>
+                                <div>
+                                    <h4 className="font-semibold text-sm">Nenhum fluxo do Typebot importado</h4>
+                                    <p className="text-xs text-muted-foreground mt-1 max-w-md">
+                                        Exporte o seu fluxo no Typebot (Settings &gt; Export JSON) e faça o upload aqui para ativar o robô inteligente.
+                                    </p>
+                                </div>
+                                <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow">
+                                    <Upload className="h-4 w-4" />
+                                    {uploadingJson ? "Importando Fluxo..." : "Carregar Arquivo .json do Typebot"}
+                                    <input type="file" accept=".json" className="hidden" onChange={handleUploadTypebotJson} disabled={uploadingJson} />
+                                </label>
+                            </div>
+                        )}
+
+                        {/* Configurações de Áudio e Transbordo */}
+                        <div className="grid sm:grid-cols-2 gap-4 pt-2">
+                            <div className="p-4 border rounded-xl space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <Label htmlFor="audio-transcribe" className="flex items-center gap-2 font-medium cursor-pointer">
+                                        <Mic className="h-4 w-4 text-purple-500" />
+                                        Transcrição de Mensagens de Áudio
+                                    </Label>
+                                    <Switch
+                                        id="audio-transcribe"
+                                        checked={typebotConfig.transcribeAudio}
+                                        onCheckedChange={v => setTypebotConfig(prev => ({ ...prev, transcribeAudio: v }))}
+                                    />
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    Converte áudios enviados pelos clientes em texto via Whisper da OpenAI, permitindo que o bot entenda gravações de voz.
+                                </p>
+                                {typebotConfig.transcribeAudio && (
+                                    <div className="space-y-1.5 pt-2">
+                                        <Label className="text-xs">Chave OpenAI API Key (Whisper)</Label>
+                                        <Input
+                                            type="password"
+                                            placeholder="sk-..."
+                                            value={typebotConfig.openaiApiKey}
+                                            onChange={e => setTypebotConfig(prev => ({ ...prev, openaiApiKey: e.target.value }))}
+                                        />
+                                        <p className="text-[10px] text-muted-foreground">Necessária apenas se a variável OPENAI_API_KEY não estiver configurada no servidor.</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="p-4 border rounded-xl space-y-3">
+                                <Label className="flex items-center gap-2 font-medium">
+                                    <UserCheck className="h-4 w-4 text-primary" />
+                                    Transbordo para Atendente Humano
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                    Quando o cliente digita uma dessas palavras, o robô pausa o atendimento para permitir que o atendente humano converse.
+                                </p>
+                                <div className="space-y-1.5 pt-1">
+                                    <Label className="text-xs">Palavras-chave (separadas por vírgula)</Label>
+                                    <Input
+                                        placeholder="atendente, humano, suporte, sair"
+                                        value={typebotConfig.handoverKeywords}
+                                        onChange={e => setTypebotConfig(prev => ({ ...prev, handoverKeywords: e.target.value }))}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="pt-2">
+                            <Button onClick={handleSaveTypebotConfig} disabled={typebotLoading || !sessionId}>
+                                {typebotLoading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                                Salvar Configurações do Typebot
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
 
                 {/* Bot Mode & Access Section */}
                 <Card>

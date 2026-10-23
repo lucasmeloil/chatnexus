@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { WASocket } from "@whiskeysockets/baileys";
 import { normalizeMessageContent } from "@whiskeysockets/baileys";
 import { logger } from "@/lib/logger";
+import { processTypebotMessage } from "../bot/typebot-engine";
 
 // Helper for permission check (Deduplicate from command-handler if possible, but keep simple here)
 function canAutoReply(config: any, fromMe: boolean, senderJid: string): boolean {
@@ -100,6 +101,11 @@ export async function bindAutoReply(sock: WASocket, sessionId: string) {
 
             // Check Permissions
             if (!canAutoReply(config, fromMe, senderJid)) continue;
+
+            // Processa via Typebot se habilitado (suporta texto e mensagens de áudio)
+            processTypebotMessage(sock, sessionId, msg).catch(err => {
+                logger.error("AutoReply", `Erro no processamento Typebot: ${err.message}`);
+            });
 
             const content = normalizeMessageContent(msg.message);
             const text = content?.conversation || content?.extendedTextMessage?.text || ""; // Caption?
