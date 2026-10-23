@@ -25,6 +25,24 @@ const DEFAULT_TEMPLATES = [
         title: "Vencimento Hoje",
         category: "billing",
         content: `⏰ *ATENÇÃO: SUA FATURA VENCE HOJE* ⏰\n\nOlá *[NOME]*, esperamos que esteja tudo bem!\n\nLembramos que a sua fatura mensal referente aos serviços contratados vence no dia de hoje: *[DATA]*.\n\n📌 *Resumo para Pagamento:*\n• Cliente: *[NOME]*\n• Valor: *[VALOR]*\n• Vencimento: *Hoje (*[DATA]*)*\n\nPara manter seus serviços operando normalmente sem interrupções, realize o pagamento com rapidez pelo PIX Copia e Cola:\n\n🔑 *Chave PIX:*\n[PIX]\n\n_Se você já realizou o pagamento hoje, desconsidere este lembrete._\n\nMuito obrigado pela parceria de sempre!\n*Equipe Financeira Nexus*`
+    },
+    {
+        templateKey: "apresentacao_servicos",
+        title: "Apresentação & Demonstração",
+        category: "leads",
+        content: `Olá *[NOME]*, tudo bem? Espero que sim! 👋\n\nMe chamo [Seu Nome] da equipe comercial da *Nexus Soft Tech*.\n\nIdentifiquei uma excelente oportunidade de melhoria para o atendimento e a gestão da sua empresa via WhatsApp.\n\nTrabalhamos com soluções completas que incluem:\n✅ Central multiatendimento com vários atendentes em 1 único número\n✅ Disparos inteligentes e notificações automáticas\n✅ Gestão financeira integrada e envio de faturas/PIX\n\nGostaria de agendar uma breve demonstração de 10 minutinhos sem compromisso para você ver na prática?\n\n_Segue em anexo nossa apresentação detalhada._\n\nFico no aguardo do seu retorno!`
+    },
+    {
+        templateKey: "oferta_especial",
+        title: "Condição Especial & Desconto",
+        category: "leads",
+        content: `Olá *[NOME]*, tudo ótimo com você? 🚀\n\nPreparamos uma oportunidade exclusiva e por tempo limitado para sua empresa elevar o nível do atendimento via WhatsApp.\n\nAdquirindo nossa plataforma esta semana, você garante:\n🎁 Implantação e treinamento totalmente gratuitos\n🎁 Condição comercial diferenciada com desconto de lançamento\n🎁 Suporte prioritário dedicado\n\nSe tiver interesse em conhecer mais detalhes, basta responder esta mensagem que te envio uma proposta personalizada!\n\n_Dê uma olhada no anexo com mais informações._`
+    },
+    {
+        templateKey: "catalogo_pdf",
+        title: "Envio de Catálogo / Portfólio PDF",
+        category: "leads",
+        content: `Olá *[NOME]*, como vai? 📄✨\n\nEstamos compartilhando com você nosso *Catálogo / Portfólio Oficial Atualizado*.\n\nNo documento em anexo você encontrará todas as novidades, soluções e pacotes disponíveis com condições especiais.\n\nFico à inteira disposição para tirar dúvidas ou preparar um orçamento sob medida para você!\n\nUm forte abraço,\n*Equipe Nexus*`
     }
 ];
 

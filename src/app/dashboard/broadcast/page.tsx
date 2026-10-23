@@ -42,7 +42,9 @@ import {
     DollarSign,
     CheckSquare,
     Square,
-    Image as ImageIcon
+    Image as ImageIcon,
+    Megaphone,
+    Target
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
@@ -78,6 +80,21 @@ const DEFAULT_COLLECTIVE_TEMPLATES: Record<string, { title: string; content: str
     vencimento_hoje: {
         title: "Vencimento Hoje",
         content: `⏰ *ATENÇÃO: SUA FATURA VENCE HOJE* ⏰\n\nOlá *[NOME]*, esperamos que esteja tudo bem!\n\nLembramos que a sua fatura mensal referente aos serviços contratados vence no dia de hoje: *[DATA]*.\n\n📌 *Resumo para Pagamento:*\n• Cliente: *[NOME]*\n• Valor: *[VALOR]*\n• Vencimento: *Hoje (*[DATA]*)*\n\nPara manter seus serviços operando normalmente sem interrupções, realize o pagamento com rapidez pelo PIX Copia e Cola:\n\n🔑 *Chave PIX:*\n[PIX]\n\n_Se você já realizou o pagamento hoje, desconsidere este lembrete._\n\nMuito obrigado pela parceria de sempre!\n*Equipe Financeira Nexus*`
+    }
+};
+
+const DEFAULT_LEAD_TEMPLATES: Record<string, { title: string; content: string }> = {
+    apresentacao_servicos: {
+        title: "Apresentação & Demonstração",
+        content: `Olá *[NOME]*, tudo bem? Espero que sim! 👋\n\nMe chamo [Seu Nome] da equipe comercial da *Nexus Soft Tech*.\n\nIdentifiquei uma excelente oportunidade de melhoria para o atendimento e a gestão da sua empresa via WhatsApp.\n\nTrabalhamos com soluções completas que incluem:\n✅ Central multiatendimento com vários atendentes em 1 único número\n✅ Disparos inteligentes e notificações automáticas\n✅ Gestão financeira integrada e envio de faturas/PIX\n\nGostaria de agendar uma breve demonstração de 10 minutinhos sem compromisso para você ver na prática?\n\n_Segue em anexo nossa apresentação detalhada._\n\nFico no aguardo do seu retorno!`
+    },
+    oferta_especial: {
+        title: "Condição Especial & Desconto",
+        content: `Olá *[NOME]*, tudo ótimo com você? 🚀\n\nPreparamos uma oportunidade exclusiva e por tempo limitado para sua empresa elevar o nível do atendimento via WhatsApp.\n\nAdquirindo nossa plataforma esta semana, você garante:\n🎁 Implantação e treinamento totalmente gratuitos\n🎁 Condição comercial diferenciada com desconto de lançamento\n🎁 Suporte prioritário dedicado\n\nSe tiver interesse em conhecer mais detalhes, basta responder esta mensagem que te envio uma proposta personalizada!\n\n_Dê uma olhada no anexo com mais informações._`
+    },
+    catalogo_pdf: {
+        title: "Envio de Catálogo / Portfólio PDF",
+        content: `Olá *[NOME]*, como vai? 📄✨\n\nEstamos compartilhando com você nosso *Catálogo / Portfólio Oficial Atualizado*.\n\nNo documento em anexo você encontrará todas as novidades, soluções e pacotes disponíveis com condições especiais.\n\nFico à inteira disposição para tirar dúvidas ou preparar um orçamento sob medida para você!\n\nUm forte abraço,\n*Equipe Nexus*`
     }
 };
 
@@ -150,7 +167,7 @@ interface CsvLead {
 export default function BroadcastPage() {
     const { sessionId } = useSession();
     const [activeTab, setActiveTab] = useState<"new" | "history">("new");
-    const [broadcastMode, setBroadcastMode] = useState<"standard" | "individual">("individual");
+    const [broadcastMode, setBroadcastMode] = useState<"standard" | "individual" | "leads">("individual");
 
     // Disparo Coletivo / Cobranças & Faturas State
     const [collectiveTargetMode, setCollectiveTargetMode] = useState<"single" | "multiple">("multiple");
@@ -167,6 +184,21 @@ export default function BroadcastPage() {
     const [useDefaultBanner, setUseDefaultBanner] = useState(true);
     const [showPasteNumbers, setShowPasteNumbers] = useState(false);
     const [pastedNumbersText, setPastedNumbersText] = useState("");
+
+    // Campanhas & Prospecção de Leads State
+    const [leadsTargetMode, setLeadsTargetMode] = useState<"single" | "multiple">("multiple");
+    const [leadRows, setLeadRows] = useState<CollectiveContactRow[]>([
+        { id: "1", phone: "", name: "" }
+    ]);
+    const [selectedLeadTemplateKey, setSelectedLeadTemplateKey] = useState<string>("apresentacao_servicos");
+    const [leadMessage, setLeadMessage] = useState(DEFAULT_LEAD_TEMPLATES.apresentacao_servicos.content);
+    const [savedLeadTemplates, setSavedLeadTemplates] = useState<Record<string, BroadcastTemplateItem>>({});
+    const [savingLeadTemplate, setSavingLeadTemplate] = useState(false);
+    const [leadMediaFile, setLeadMediaFile] = useState<File | null>(null);
+    const [leadMediaPreviewUrl, setLeadMediaPreviewUrl] = useState<string | null>(null);
+    const leadFileInputRef = useRef<HTMLInputElement>(null);
+    const [showPasteLeadNumbers, setShowPasteLeadNumbers] = useState(false);
+    const [pastedLeadNumbersText, setPastedLeadNumbersText] = useState("");
 
     // Modal de Seleção de Contatos Salvos
     const [contactModalOpen, setContactModalOpen] = useState(false);
@@ -486,8 +518,12 @@ export default function BroadcastPage() {
                         map[item.templateKey] = item;
                     });
                     setSavedTemplates(map);
+                    setSavedLeadTemplates(map);
                     if (map["fatura_atraso"]?.content) {
                         setMessage(map["fatura_atraso"].content);
+                    }
+                    if (map["apresentacao_servicos"]?.content) {
+                        setLeadMessage(map["apresentacao_servicos"].content);
                     }
                 }
             }
@@ -564,6 +600,157 @@ export default function BroadcastPage() {
         }
     };
 
+    // --- FUNÇÕES ESPECÍFICAS DE LEADS & CAMPANHAS ---
+    const addLeadRow = () => {
+        setLeadRows(prev => [
+            ...prev,
+            { id: String(Date.now() + Math.random()), phone: "", name: "" }
+        ]);
+    };
+
+    const updateLeadRow = (id: string, field: "phone" | "name", value: string) => {
+        setLeadRows(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row));
+    };
+
+    const removeLeadRow = (id: string) => {
+        setLeadRows(prev => {
+            if (prev.length <= 1) {
+                return [{ id: String(Date.now()), phone: "", name: "" }];
+            }
+            return prev.filter(row => row.id !== id);
+        });
+    };
+
+    const clearLeadRows = () => {
+        setLeadRows([{ id: String(Date.now()), phone: "", name: "" }]);
+        toast.info("Lista de leads limpa.");
+    };
+
+    const handleSelectLeadTemplate = (key: string) => {
+        setSelectedLeadTemplateKey(key);
+        if (key === "custom") return;
+        const tmpl = savedLeadTemplates[key]?.content || DEFAULT_LEAD_TEMPLATES[key]?.content;
+        if (tmpl) {
+            setLeadMessage(tmpl);
+            toast.info(`Modelo de prospecção "${DEFAULT_LEAD_TEMPLATES[key]?.title || key}" carregado.`);
+        }
+    };
+
+    const handleSaveLeadTemplateToDb = async () => {
+        if (!selectedLeadTemplateKey || selectedLeadTemplateKey === "custom") {
+            toast.error("Selecione um dos modelos específicos de prospecção para salvar no banco de dados.");
+            return;
+        }
+        if (!leadMessage.trim()) {
+            toast.error("O texto da campanha não pode estar vazio.");
+            return;
+        }
+
+        setSavingLeadTemplate(true);
+        try {
+            const currentTitle = DEFAULT_LEAD_TEMPLATES[selectedLeadTemplateKey]?.title || selectedLeadTemplateKey;
+            const res = await fetch("/api/broadcast/templates", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    templateKey: selectedLeadTemplateKey,
+                    title: currentTitle,
+                    content: leadMessage,
+                    category: "leads"
+                })
+            });
+
+            const data = await res.json();
+            if (res.ok && data.status) {
+                setSavedLeadTemplates(prev => ({
+                    ...prev,
+                    [selectedLeadTemplateKey]: data.data
+                }));
+                toast.success(`Modelo "${currentTitle}" salvo no banco de dados com sucesso!`);
+            } else {
+                toast.error(data.message || "Erro ao salvar modelo no banco de dados.");
+            }
+        } catch (e) {
+            console.error("Erro ao salvar modelo de lead:", e);
+            toast.error("Falha ao salvar modelo no banco de dados.");
+        } finally {
+            setSavingLeadTemplate(false);
+        }
+    };
+
+    const handleRestoreDefaultLeadTemplate = () => {
+        if (selectedLeadTemplateKey && DEFAULT_LEAD_TEMPLATES[selectedLeadTemplateKey]) {
+            setLeadMessage(DEFAULT_LEAD_TEMPLATES[selectedLeadTemplateKey].content);
+            toast.info("Texto restaurado para o modelo padrão.");
+        }
+    };
+
+    const handleLeadMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (file.size > 25 * 1024 * 1024) {
+            toast.error("O arquivo excede o limite máximo de 25MB.");
+            return;
+        }
+
+        setLeadMediaFile(file);
+        if (file.type.startsWith("image/")) {
+            setLeadMediaPreviewUrl(URL.createObjectURL(file));
+        } else {
+            setLeadMediaPreviewUrl(null);
+        }
+        toast.success(`${file.type.startsWith("image/") ? "Imagem" : "PDF"} anexado: ${file.name}`);
+    };
+
+    const handleRemoveLeadMedia = () => {
+        setLeadMediaFile(null);
+        setLeadMediaPreviewUrl(null);
+        if (leadFileInputRef.current) leadFileInputRef.current.value = "";
+        toast.info("Anexo removido da campanha.");
+    };
+
+    const handleApplyPastedLeadNumbers = () => {
+        if (!pastedLeadNumbersText.trim()) {
+            toast.error("Cole ao menos um número de telefone.");
+            return;
+        }
+
+        const lines = pastedLeadNumbersText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const newRows: CollectiveContactRow[] = [];
+        const existingPhones = new Set(leadRows.map(r => r.phone.replace(/\D/g, "")).filter(Boolean));
+
+        lines.forEach((line, idx) => {
+            const parts = line.split(/[,;\t]/);
+            const rawPhone = parts[0] || "";
+            const cleanDigits = rawPhone.replace(/\D/g, "");
+            const rawName = parts.slice(1).join(" ").trim();
+
+            if (cleanDigits.length >= 8 && !existingPhones.has(cleanDigits)) {
+                existingPhones.add(cleanDigits);
+                newRows.push({
+                    id: String(Date.now() + idx + Math.random()),
+                    phone: cleanDigits,
+                    name: rawName
+                });
+            }
+        });
+
+        if (newRows.length === 0) {
+            toast.warning("Nenhum número novo válido encontrado.");
+            return;
+        }
+
+        setLeadRows(prev => {
+            const hasEmptyFirst = prev.length === 1 && !prev[0].phone && !prev[0].name;
+            return hasEmptyFirst ? newRows : [...prev, ...newRows];
+        });
+
+        toast.success(`${newRows.length} lead(s) adicionado(s) à lista!`);
+        setPastedLeadNumbersText("");
+        setShowPasteLeadNumbers(false);
+    };
+
     // Seleção de Contatos Salvos no Sistema
     const loadSystemContacts = async () => {
         if (!sessionId) return;
@@ -596,6 +783,21 @@ export default function BroadcastPage() {
         const cleanPhone = contact.jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
         const contactName = contact.name || contact.notify || contact.verifiedName || "";
         
+        if (broadcastMode === "leads") {
+            setLeadRows(prev => {
+                const updated = [...prev];
+                updated[0] = {
+                    id: updated[0]?.id || String(Date.now()),
+                    phone: cleanPhone,
+                    name: contactName
+                };
+                return updated;
+            });
+            setContactModalOpen(false);
+            toast.success(`Lead ${contactName || cleanPhone} selecionado com sucesso!`);
+            return;
+        }
+
         setCollectiveRows(prev => {
             const updated = [...prev];
             updated[0] = {
@@ -630,6 +832,39 @@ export default function BroadcastPage() {
     const handleAddSelectedContactsToRows = () => {
         if (selectedContactJids.size === 0) {
             toast.warning("Nenhum contato selecionado.");
+            return;
+        }
+
+        if (broadcastMode === "leads") {
+            const existingPhones = new Set(leadRows.map(r => r.phone.replace(/\D/g, "")).filter(Boolean));
+            const newRows: CollectiveContactRow[] = [];
+
+            systemContacts.forEach((contact, idx) => {
+                if (selectedContactJids.has(contact.jid)) {
+                    const cleanPhone = contact.jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+                    const cleanDigits = cleanPhone.replace(/\D/g, "");
+                    if (cleanDigits && !existingPhones.has(cleanDigits)) {
+                        existingPhones.add(cleanDigits);
+                        newRows.push({
+                            id: String(Date.now() + idx + Math.random()),
+                            phone: cleanPhone,
+                            name: contact.name || contact.notify || contact.verifiedName || ""
+                        });
+                    }
+                }
+            });
+
+            if (newRows.length === 0) {
+                toast.info("Os contatos selecionados já constam na tabela de leads.");
+            } else {
+                setLeadRows(prev => {
+                    const hasEmptyFirst = prev.length === 1 && !prev[0].phone && !prev[0].name;
+                    return hasEmptyFirst ? newRows : [...prev, ...newRows];
+                });
+                toast.success(`${newRows.length} lead(s) adicionado(s) à tabela!`);
+            }
+
+            setContactModalOpen(false);
             return;
         }
 
@@ -866,6 +1101,62 @@ export default function BroadcastPage() {
                     setLoading(false);
                 }
 
+            } else if (broadcastMode === "leads") {
+                // Modo Campanhas & Prospecção de Leads
+                const targetRows = leadsTargetMode === "single"
+                    ? (leadRows[0]?.phone.trim().replace(/\D/g, "").length >= 8 ? [leadRows[0]] : [])
+                    : leadRows.filter(r => r.phone.trim().replace(/\D/g, "").length >= 8);
+
+                if (targetRows.length === 0) {
+                    toast.error("Informe pelo menos 1 número de WhatsApp válido para o envio da campanha.");
+                    setLoading(false);
+                    return;
+                }
+
+                if (!leadMessage.trim() && !leadMediaFile) {
+                    toast.error("Digite o texto da campanha ou selecione uma imagem/PDF de apresentação.");
+                    setLoading(false);
+                    return;
+                }
+
+                const itemsMeta = targetRows.map((row) => {
+                    const formattedJid = formatToBrazilPhoneJid(row.phone);
+                    let itemMsg = leadMessage
+                        .replace(/\[NOME\]|{nome}/gi, row.name?.trim() || "")
+                        .replace(/\[TELEFONE\]|{telefone}/gi, row.phone.trim() || "");
+
+                    return {
+                        jid: formattedJid,
+                        name: row.name?.trim() || "",
+                        message: itemMsg,
+                        hasFile: !!leadMediaFile,
+                        fileIndex: leadMediaFile ? 0 : -1
+                    };
+                });
+
+                const formData = new FormData();
+                formData.append("mode", "individual");
+                formData.append("delay", String(delay[0]));
+                formData.append("sendPixSeparately", "false");
+                formData.append("items", JSON.stringify(itemsMeta));
+                if (leadMediaFile) {
+                    formData.append("file_0", leadMediaFile);
+                }
+
+                const res = await fetch(`/api/messages/${sessionId}/broadcast`, {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    toast.info(`Campanha de prospecção iniciada para ${targetRows.length} lead${targetRows.length !== 1 ? "s" : ""}...`);
+                } else {
+                    toast.error(data.message || "Falha ao iniciar campanha de prospecção");
+                    setLoading(false);
+                }
+
             } else {
                 // Modo Disparo Coletivo & Cobranças
                 const targetRows = collectiveTargetMode === "single"
@@ -958,13 +1249,21 @@ export default function BroadcastPage() {
         ? (collectiveRows[0]?.phone.trim().replace(/\D/g, "").length >= 8 ? [collectiveRows[0]] : [])
         : collectiveRows.filter(r => r.phone.trim().replace(/\D/g, "").length >= 8);
 
+    const leadValidRows = leadsTargetMode === "single"
+        ? (leadRows[0]?.phone.trim().replace(/\D/g, "").length >= 8 ? [leadRows[0]] : [])
+        : leadRows.filter(r => r.phone.trim().replace(/\D/g, "").length >= 8);
+
     const recipientCount = broadcastMode === "individual"
         ? individualRows.filter(r => r.phone.trim().length >= 8).length
-        : collectiveValidRows.length;
+        : broadcastMode === "leads"
+            ? leadValidRows.length
+            : collectiveValidRows.length;
 
     const filesCount = broadcastMode === "individual"
         ? individualRows.filter(r => r.file !== null).length
-        : (standardFile || useDefaultBanner) ? 1 : 0;
+        : broadcastMode === "leads"
+            ? (leadMediaFile ? 1 : 0)
+            : (standardFile || useDefaultBanner) ? 1 : 0;
 
     const formatJid = (jid: string) => {
         if (!jid) return "-";
@@ -1023,11 +1322,11 @@ export default function BroadcastPage() {
                             <div>
                                 <h4 className="text-xs font-bold text-foreground">Modalidade de Envio</h4>
                                 <p className="text-[11px] text-muted-foreground">
-                                    Escolha entre envio individualizado por cliente (boletos e Pix) ou disparo padrão coletivo.
+                                    Escolha entre envio individualizado de boletos, disparos coletivos de cobrança, ou campanhas de prospecção para leads.
                                 </p>
                             </div>
 
-                            <div className="flex gap-1.5 bg-background p-1 rounded-xl border shadow-2xs">
+                            <div className="flex gap-1.5 bg-background p-1 rounded-xl border shadow-2xs flex-wrap">
                                 <button
                                     type="button"
                                     onClick={() => setBroadcastMode("individual")}
@@ -1049,6 +1348,17 @@ export default function BroadcastPage() {
                                     }`}
                                 >
                                     <Users className="h-3.5 w-3.5" /> Disparo Coletivo & Cobranças
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setBroadcastMode("leads")}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                        broadcastMode === "leads"
+                                            ? "bg-primary text-primary-foreground shadow-xs"
+                                            : "text-muted-foreground hover:text-foreground"
+                                    }`}
+                                >
+                                    <Megaphone className="h-3.5 w-3.5" /> Campanhas & Prospecção de Leads
                                 </button>
                             </div>
                         </div>
@@ -2069,6 +2379,560 @@ export default function BroadcastPage() {
                                                     ) : (
                                                         <>
                                                             <Send className="mr-2 h-4 w-4" /> Iniciar Disparo Coletivo ({recipientCount} Destinatário{recipientCount !== 1 ? "s" : ""})
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* MODE 3: CAMPANHAS & PROSPECÇÃO DE LEADS */}
+                        {broadcastMode === "leads" && (
+                            <div className="space-y-6">
+                                <div className="grid gap-6 grid-cols-1 lg:grid-cols-12">
+                                    {/* Destinatários Card (5 Cols) - Lista de Leads e Prospecção */}
+                                    <Card className="lg:col-span-5 shadow-xs border-border/70 flex flex-col justify-between">
+                                        <div>
+                                            <CardHeader className="flex flex-col gap-3 pb-3 border-b bg-muted/20">
+                                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                    <div>
+                                                        <CardTitle className="text-sm sm:text-base font-bold flex items-center gap-2">
+                                                            <Target className="h-4 w-4 text-primary" /> Destinatários da Campanha
+                                                        </CardTitle>
+                                                        <CardDescription className="text-xs mt-0.5">
+                                                            Insira os números dos contatos ou leads para prospecção.
+                                                        </CardDescription>
+                                                    </div>
+
+                                                    {/* Toggle 1 Lead vs Múltiplos Leads */}
+                                                    <div className="flex items-center p-0.5 bg-background rounded-lg border shadow-2xs">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setLeadsTargetMode("single")}
+                                                            className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
+                                                                leadsTargetMode === "single"
+                                                                    ? "bg-primary text-primary-foreground shadow-xs"
+                                                                    : "text-muted-foreground hover:text-foreground"
+                                                            }`}
+                                                        >
+                                                            1 Lead
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setLeadsTargetMode("multiple")}
+                                                            className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
+                                                                leadsTargetMode === "multiple"
+                                                                    ? "bg-primary text-primary-foreground shadow-xs"
+                                                                    : "text-muted-foreground hover:text-foreground"
+                                                            }`}
+                                                        >
+                                                            Vários Leads
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Toolbar de Ações Rápidas */}
+                                                <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={handleOpenContactModal}
+                                                        className="h-7 text-[11px] gap-1.5 font-semibold text-primary border-primary/30 hover:bg-primary/10 cursor-pointer"
+                                                        disabled={loading}
+                                                    >
+                                                        <UserCheck className="h-3.5 w-3.5" /> Selecionar Contatos Salvos
+                                                    </Button>
+
+                                                    {leadsTargetMode === "multiple" && (
+                                                        <>
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="outline"
+                                                                onClick={addLeadRow}
+                                                                className="h-7 text-[11px] gap-1 cursor-pointer font-semibold"
+                                                                disabled={loading}
+                                                            >
+                                                                <Plus className="h-3.5 w-3.5" /> Adicionar Lead
+                                                            </Button>
+
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                onClick={() => setShowPasteLeadNumbers(!showPasteLeadNumbers)}
+                                                                className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                                                            >
+                                                                📋 Colar Lista
+                                                            </Button>
+
+                                                            {leadRows.length > 1 && (
+                                                                <Button
+                                                                    type="button"
+                                                                    size="sm"
+                                                                    variant="ghost"
+                                                                    onClick={clearLeadRows}
+                                                                    className="h-7 text-[11px] gap-1 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer ml-auto"
+                                                                >
+                                                                    <Trash2 className="h-3 w-3" /> Limpar
+                                                                </Button>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </div>
+
+                                                {/* Caixa Retrátil de Colar Telefones em Massa */}
+                                                {showPasteLeadNumbers && leadsTargetMode === "multiple" && (
+                                                    <div className="p-3 bg-background rounded-xl border border-primary/20 space-y-2 mt-1">
+                                                        <div className="flex items-center justify-between">
+                                                            <Label className="text-[11px] font-semibold text-primary">
+                                                                Cole números ou "Telefone, Nome" (um por linha):
+                                                            </Label>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setShowPasteLeadNumbers(false)}
+                                                                className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                                                            >
+                                                                Fechar
+                                                            </button>
+                                                        </div>
+                                                        <Textarea
+                                                            placeholder="557999887766, Lucas Melo&#10;5511999998888, Padaria Central&#10;5521988887777"
+                                                            value={pastedLeadNumbersText}
+                                                            onChange={e => setPastedLeadNumbersText(e.target.value)}
+                                                            rows={3}
+                                                            className="text-xs font-mono"
+                                                        />
+                                                        <div className="flex justify-end gap-2">
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                onClick={handleApplyPastedLeadNumbers}
+                                                                className="h-7 text-xs font-semibold cursor-pointer"
+                                                            >
+                                                                Adicionar à Lista
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </CardHeader>
+
+                                            <CardContent className="p-4 space-y-4">
+                                                {/* Modo 1 Lead / Teste */}
+                                                {leadsTargetMode === "single" ? (
+                                                    <div className="p-3.5 rounded-xl border border-border/70 bg-card space-y-3">
+                                                        <div className="space-y-1">
+                                                            <Label className="text-xs font-semibold">
+                                                                WhatsApp do Lead: <span className="text-red-500">*</span>
+                                                            </Label>
+                                                            <Input
+                                                                placeholder="ex: 5579999887766 ou 79999887766"
+                                                                value={leadRows[0]?.phone || ""}
+                                                                onChange={e => updateLeadRow(leadRows[0]?.id || "1", "phone", e.target.value)}
+                                                                className="h-8 text-xs font-mono"
+                                                                disabled={loading}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <Label className="text-xs font-semibold">
+                                                                Nome do Lead / Empresa: <span className="text-muted-foreground font-normal">(opcional)</span>
+                                                            </Label>
+                                                            <Input
+                                                                placeholder="ex: Dr. Ricardo / Loja Alpha"
+                                                                value={leadRows[0]?.name || ""}
+                                                                onChange={e => updateLeadRow(leadRows[0]?.id || "1", "name", e.target.value)}
+                                                                className="h-8 text-xs"
+                                                                disabled={loading}
+                                                            />
+                                                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                                                                Substitui a tag <code className="bg-muted px-1 rounded text-[10px] font-mono">*&#91;NOME&#93;*</code> na mensagem.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    /* Modo Vários Leads: Tabela */
+                                                    <div className="border border-border/70 rounded-xl overflow-hidden bg-card shadow-2xs">
+                                                        <div className="max-h-[380px] overflow-y-auto">
+                                                            <table className="w-full text-xs text-left border-collapse">
+                                                                <thead className="bg-muted/40 sticky top-0 z-10 border-b text-muted-foreground uppercase text-[10px] font-bold tracking-wider">
+                                                                    <tr>
+                                                                        <th className="py-2 px-3 w-10 text-center">#</th>
+                                                                        <th className="py-2 px-3">WhatsApp do Lead <span className="text-red-500">*</span></th>
+                                                                        <th className="py-2 px-3">Nome / Empresa</th>
+                                                                        <th className="py-2 px-3 w-12 text-center">Ação</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-border/50">
+                                                                    {leadRows.map((row, index) => {
+                                                                        const hasValidPhone = row.phone.trim().replace(/\D/g, "").length >= 8;
+                                                                        return (
+                                                                            <tr key={row.id} className="hover:bg-muted/20 transition-colors">
+                                                                                <td className="py-2 px-3 text-center text-muted-foreground font-mono text-[11px]">
+                                                                                    {index + 1}
+                                                                                </td>
+                                                                                <td className="py-2 px-3">
+                                                                                    <Input
+                                                                                        placeholder="ex: 557999887766"
+                                                                                        value={row.phone}
+                                                                                        onChange={e => updateLeadRow(row.id, "phone", e.target.value)}
+                                                                                        className={`h-7.5 text-xs font-mono ${
+                                                                                            row.phone && !hasValidPhone
+                                                                                                ? "border-red-400 focus-visible:ring-red-400"
+                                                                                                : ""
+                                                                                        }`}
+                                                                                        disabled={loading}
+                                                                                    />
+                                                                                </td>
+                                                                                <td className="py-2 px-3">
+                                                                                    <Input
+                                                                                        placeholder="Nome / Empresa"
+                                                                                        value={row.name}
+                                                                                        onChange={e => updateLeadRow(row.id, "name", e.target.value)}
+                                                                                        className="h-7.5 text-xs"
+                                                                                        disabled={loading}
+                                                                                    />
+                                                                                </td>
+                                                                                <td className="py-2 px-3 text-center">
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => removeLeadRow(row.id)}
+                                                                                        className="text-muted-foreground hover:text-red-500 transition-colors p-1 cursor-pointer"
+                                                                                        title="Remover linha"
+                                                                                        disabled={loading}
+                                                                                    >
+                                                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                                                    </button>
+                                                                                </td>
+                                                                            </tr>
+                                                                        );
+                                                                    })}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </CardContent>
+                                        </div>
+
+                                        {/* Status Footer */}
+                                        <div className="p-3 bg-muted/20 border-t flex items-center justify-between text-xs">
+                                            <span className="text-muted-foreground">
+                                                Leads válidos: <strong className="text-foreground font-mono">{leadValidRows.length}</strong>
+                                            </span>
+                                            {leadsTargetMode === "multiple" && (
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={addLeadRow}
+                                                    className="h-7 text-xs font-semibold text-primary cursor-pointer gap-1"
+                                                >
+                                                    <Plus className="h-3.5 w-3.5" /> Adicionar Linha
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </Card>
+
+                                    {/* Conteúdo da Mensagem & Anexo (Imagem ou PDF) (7 Cols) */}
+                                    <Card className="lg:col-span-7 shadow-xs border-border/70 flex flex-col justify-between">
+                                        <CardHeader className="flex flex-row items-center justify-between pb-3 border-b bg-muted/20">
+                                            <div>
+                                                <CardTitle className="text-sm sm:text-base font-bold flex items-center gap-2">
+                                                    <Sparkles className="h-4 w-4 text-amber-500" /> Mensagem da Campanha & Proposta
+                                                </CardTitle>
+                                                <CardDescription className="text-xs mt-0.5">
+                                                    Configure o texto persuasivo e anexe uma foto ou documento PDF (catálogo/apresentação).
+                                                </CardDescription>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={handleSaveLeadTemplateToDb}
+                                                    disabled={savingLeadTemplate || loading || selectedLeadTemplateKey === "custom"}
+                                                    className="h-7.5 text-xs font-semibold gap-1 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer"
+                                                >
+                                                    {savingLeadTemplate ? (
+                                                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                                    ) : (
+                                                        <Save className="h-3.5 w-3.5" />
+                                                    )}
+                                                    Salvar no Banco
+                                                </Button>
+                                            </div>
+                                        </CardHeader>
+
+                                        <CardContent className="p-5 space-y-4">
+                                            {/* Modelos Inteligentes de Prospecção */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="text-xs font-bold text-foreground">
+                                                        Modelos de Prospecção:
+                                                    </Label>
+                                                    {selectedLeadTemplateKey !== "custom" && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleRestoreDefaultLeadTemplate}
+                                                            className="text-[11px] text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+                                                        >
+                                                            Restaurar padrão
+                                                        </button>
+                                                    )}
+                                                </div>
+
+                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectLeadTemplate("apresentacao_servicos")}
+                                                        className={`p-2 rounded-lg text-left text-xs font-semibold transition-all border cursor-pointer ${
+                                                            selectedLeadTemplateKey === "apresentacao_servicos"
+                                                                ? "bg-primary/10 border-primary/40 text-primary shadow-2xs"
+                                                                : "bg-background hover:bg-muted/50 text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 font-bold truncate">
+                                                            <Sparkles className="h-3.5 w-3.5 text-primary shrink-0" />
+                                                            <span>Apresentação</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate font-normal">
+                                                            Demonstração
+                                                        </p>
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectLeadTemplate("oferta_especial")}
+                                                        className={`p-2 rounded-lg text-left text-xs font-semibold transition-all border cursor-pointer ${
+                                                            selectedLeadTemplateKey === "oferta_especial"
+                                                                ? "bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-400 shadow-2xs"
+                                                                : "bg-background hover:bg-muted/50 text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 font-bold truncate">
+                                                            <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                                            <span>Oferta Especial</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate font-normal">
+                                                            Condição e desconto
+                                                        </p>
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectLeadTemplate("catalogo_pdf")}
+                                                        className={`p-2 rounded-lg text-left text-xs font-semibold transition-all border cursor-pointer ${
+                                                            selectedLeadTemplateKey === "catalogo_pdf"
+                                                                ? "bg-rose-500/10 border-rose-500/40 text-rose-700 dark:text-rose-400 shadow-2xs"
+                                                                : "bg-background hover:bg-muted/50 text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 font-bold truncate">
+                                                            <FileText className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                                                            <span>Catálogo PDF</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate font-normal">
+                                                            Portfólio em anexo
+                                                        </p>
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectLeadTemplate("custom")}
+                                                        className={`p-2 rounded-lg text-left text-xs font-semibold transition-all border cursor-pointer ${
+                                                            selectedLeadTemplateKey === "custom"
+                                                                ? "bg-primary/10 border-primary/40 text-primary shadow-2xs"
+                                                                : "bg-background hover:bg-muted/50 text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 font-bold truncate">
+                                                            <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                                                            <span>Mensagem Livre</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate font-normal">
+                                                            Texto personalizado
+                                                        </p>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Textarea da Mensagem */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between flex-wrap gap-2">
+                                                    <Label className="text-xs font-semibold">
+                                                        Texto da Mensagem:
+                                                    </Label>
+                                                    <div className="flex items-center gap-1 flex-wrap">
+                                                        <span className="text-[10px] text-muted-foreground font-medium">Inserir:</span>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setLeadMessage(prev => prev + " *[NOME]*")}
+                                                            className="h-6 text-[10px] px-1.5 gap-1 cursor-pointer font-medium"
+                                                        >
+                                                            + Nome (*&#91;NOME&#93;*)
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setLeadMessage(prev => prev + " *[TELEFONE]*")}
+                                                            className="h-6 text-[10px] px-1.5 gap-1 cursor-pointer font-medium"
+                                                        >
+                                                            + Tel (*&#91;TELEFONE&#93;*)
+                                                        </Button>
+                                                    </div>
+                                                </div>
+
+                                                <Textarea
+                                                    placeholder="Digite o texto da sua campanha de prospecção..."
+                                                    className="min-h-[140px] text-xs font-mono leading-relaxed bg-background"
+                                                    value={leadMessage}
+                                                    onChange={e => setLeadMessage(e.target.value)}
+                                                    disabled={loading}
+                                                />
+                                            </div>
+
+                                            {/* Anexo da Campanha: Imagem OU Documento PDF */}
+                                            <div className="space-y-2 pt-1">
+                                                <Label className="text-xs font-semibold flex items-center justify-between">
+                                                    <span className="flex items-center gap-1.5">
+                                                        <Paperclip className="h-3.5 w-3.5 text-primary" /> Foto Promocional ou Catálogo / Apresentação em PDF:
+                                                    </span>
+                                                    {leadMediaFile && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleRemoveLeadMedia}
+                                                            className="text-[11px] text-red-500 hover:text-red-700 flex items-center gap-1 cursor-pointer font-medium"
+                                                        >
+                                                            <X className="h-3 w-3" /> Remover anexo
+                                                        </button>
+                                                    )}
+                                                </Label>
+
+                                                <input
+                                                    ref={leadFileInputRef}
+                                                    type="file"
+                                                    accept="image/*,application/pdf"
+                                                    className="hidden"
+                                                    onChange={handleLeadMediaSelect}
+                                                    disabled={loading}
+                                                />
+
+                                                {leadMediaFile ? (
+                                                    <div className="flex items-center justify-between p-3.5 rounded-xl border border-primary/30 bg-primary/5 shadow-2xs">
+                                                        <div className="flex items-center gap-3 min-w-0">
+                                                            {leadMediaFile.type.startsWith("image/") && leadMediaPreviewUrl ? (
+                                                                <img
+                                                                    src={leadMediaPreviewUrl}
+                                                                    alt="Preview da Campanha"
+                                                                    className="h-14 w-14 rounded-lg object-cover border shrink-0 bg-background"
+                                                                />
+                                                            ) : (
+                                                                <div className="h-14 w-14 rounded-lg bg-red-100 dark:bg-red-950/40 text-red-600 flex flex-col items-center justify-center shrink-0 border border-red-300 dark:border-red-900">
+                                                                    <FileText className="h-7 w-7" />
+                                                                    <span className="text-[9px] font-black uppercase tracking-wider">PDF</span>
+                                                                </div>
+                                                            )}
+                                                            <div className="min-w-0">
+                                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                                    <span className="font-semibold text-xs text-foreground truncate max-w-[240px]">
+                                                                        {leadMediaFile.name}
+                                                                    </span>
+                                                                    <Badge className="text-[9px] px-1.5 py-0 h-4 bg-primary text-primary-foreground">
+                                                                        {leadMediaFile.type.startsWith("image/") ? "Imagem" : "PDF"}
+                                                                    </Badge>
+                                                                </div>
+                                                                <p className="text-[11px] text-muted-foreground mt-0.5">
+                                                                    {formatFileSize(leadMediaFile.size)} • Pronto para ser enviado aos leads
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 shrink-0">
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => leadFileInputRef.current?.click()}
+                                                                className="h-7 text-xs font-medium cursor-pointer"
+                                                            >
+                                                                Trocar
+                                                            </Button>
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={handleRemoveLeadMedia}
+                                                                className="h-7 w-7 p-0 text-muted-foreground hover:text-red-600 cursor-pointer"
+                                                            >
+                                                                <X className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    /* Estado sem anexo: área para upload */
+                                                    <div
+                                                        onClick={() => leadFileInputRef.current?.click()}
+                                                        className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-primary/50 dark:hover:border-primary/50 text-center space-y-2 bg-muted/20 cursor-pointer transition-all hover:bg-muted/40"
+                                                    >
+                                                        <div className="flex items-center justify-center gap-3 text-muted-foreground">
+                                                            <div className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+                                                                <ImageIcon className="h-5 w-5" />
+                                                            </div>
+                                                            <div className="h-10 w-10 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center">
+                                                                <FileText className="h-5 w-5" />
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-xs font-semibold text-foreground">
+                                                                Clique para anexar Imagem (JPG, PNG) ou Catálogo/Apresentação (PDF)
+                                                            </p>
+                                                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                                                                Tamanho máximo: 25MB • Opcional (se não anexar, o lead receberá apenas o texto)
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Delay e Botão de Disparo */}
+                                            <div className="space-y-4 pt-3 border-t">
+                                                <div className="space-y-2 p-3 rounded-xl bg-muted/40 border border-border/50">
+                                                    <div className="flex justify-between items-center text-xs">
+                                                        <Label className="font-semibold">Intervalo de Segurança Anti-Ban:</Label>
+                                                        <span className="font-mono font-bold text-primary">{(delay[0] / 1000).toFixed(1)}s</span>
+                                                    </div>
+                                                    <Slider
+                                                        defaultValue={[2000]}
+                                                        min={1000}
+                                                        max={15000}
+                                                        step={500}
+                                                        value={delay}
+                                                        onValueChange={setDelay}
+                                                        disabled={loading}
+                                                    />
+                                                    <p className="text-[10px] text-muted-foreground">
+                                                        Recomendado de 2.5s a 5.0s entre disparos para contatos novos e prospecção de leads.
+                                                    </p>
+                                                </div>
+
+                                                <Button
+                                                    className="w-full font-bold h-12 text-sm shadow-md cursor-pointer bg-primary hover:bg-primary/90"
+                                                    onClick={handleSend}
+                                                    disabled={loading || !sessionId || recipientCount === 0 || (!leadMessage.trim() && !leadMediaFile)}
+                                                >
+                                                    {loading ? (
+                                                        <>
+                                                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Disparando campanha...
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Send className="mr-2 h-4 w-4" /> Iniciar Campanha de Prospecção ({recipientCount} Lead{recipientCount !== 1 ? "s" : ""})
                                                         </>
                                                     )}
                                                 </Button>
