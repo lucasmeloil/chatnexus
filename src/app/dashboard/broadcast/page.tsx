@@ -34,13 +34,52 @@ import {
     Check,
     Receipt,
     HelpCircle,
-    Zap
+    Zap,
+    Save,
+    Search,
+    UserCheck,
+    Calendar,
+    DollarSign,
+    CheckSquare,
+    Square,
+    Image as ImageIcon
 } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { useSession } from "@/components/dashboard/session-provider";
 import { SessionGuard } from "@/components/dashboard/session-guard";
 import { useSocket } from "@/components/chat/socket-context";
 import { formatToBrazilPhoneJid } from "@/lib/jid-utils";
+
+interface CollectiveContactRow {
+    id: string;
+    phone: string;
+    name: string;
+}
+
+interface BroadcastTemplateItem {
+    id: string;
+    templateKey: string;
+    title: string;
+    content: string;
+    category?: string;
+    updatedAt?: string;
+}
+
+const DEFAULT_COLLECTIVE_TEMPLATES: Record<string, { title: string; content: string }> = {
+    fatura_atraso: {
+        title: "Aviso de Fatura em Atraso",
+        content: `⚠️ *AVISO DE FATURA EM ATRASO* ⚠️\n\nOlá *[NOME]*, tudo bem?\n\nIdentificamos em nosso sistema que a fatura referente aos serviços contratados encontra-se em atraso.\n\n📌 *Dados da Cobrança:*\n• Cliente: *[NOME]*\n• Valor em Aberto: *[VALOR]*\n• Data de Vencimento: *[DATA]*\n\nPara evitar a suspensão temporária dos seus acessos e serviços, solicitamos a regularização o mais breve possível.\n\n🔑 *Chave PIX Copia e Cola:*\n[PIX]\n\n_Caso o pagamento já tenha sido efetuado nas últimas horas, por favor desconsidere este aviso ou nos envie o comprovante de pagamento por aqui._\n\nAgradecemos pela compreensão e parceria!\n*Equipe Financeira Nexus*`
+    },
+    vencimento_proximo: {
+        title: "Vencimento se Aproxima",
+        content: `📅 *LEMBRETE: SUA FATURA VENCE EM BREVE* 🔔\n\nOlá *[NOME]*, tudo bem?\n\nPassando para lembrar que a sua fatura mensal referente aos serviços Nexus vencerá em breve.\n\n📌 *Informações da Fatura:*\n• Cliente: *[NOME]*\n• Valor: *[VALOR]*\n• Vencimento: *[DATA]*\n\nVocê pode antecipar seu pagamento de forma rápida e prática utilizando a chave PIX Copia e Cola:\n\n🔑 *Chave PIX:*\n[PIX]\n\nAgradecemos pela pontualidade e preferência!\n*Equipe Financeira Nexus*`
+    },
+    vencimento_hoje: {
+        title: "Vencimento Hoje",
+        content: `⏰ *ATENÇÃO: SUA FATURA VENCE HOJE* ⏰\n\nOlá *[NOME]*, esperamos que esteja tudo bem!\n\nLembramos que a sua fatura mensal referente aos serviços contratados vence no dia de hoje: *[DATA]*.\n\n📌 *Resumo para Pagamento:*\n• Cliente: *[NOME]*\n• Valor: *[VALOR]*\n• Vencimento: *Hoje (*[DATA]*)*\n\nPara manter seus serviços operando normalmente sem interrupções, realize o pagamento com rapidez pelo PIX Copia e Cola:\n\n🔑 *Chave PIX:*\n[PIX]\n\n_Se você já realizou o pagamento hoje, desconsidere este lembrete._\n\nMuito obrigado pela parceria de sempre!\n*Equipe Financeira Nexus*`
+    }
+};
 
 interface BroadcastProgress {
     broadcastId: string;
@@ -113,9 +152,32 @@ export default function BroadcastPage() {
     const [activeTab, setActiveTab] = useState<"new" | "history">("new");
     const [broadcastMode, setBroadcastMode] = useState<"standard" | "individual">("individual");
 
+    // Disparo Coletivo / Cobranças & Faturas State
+    const [collectiveTargetMode, setCollectiveTargetMode] = useState<"single" | "multiple">("multiple");
+    const [collectiveRows, setCollectiveRows] = useState<CollectiveContactRow[]>([
+        { id: "1", phone: "", name: "" }
+    ]);
+    const [collectiveAmount, setCollectiveAmount] = useState("");
+    const [collectiveDueDate, setCollectiveDueDate] = useState("");
+    const [collectivePixCode, setCollectivePixCode] = useState("");
+    const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>("fatura_atraso");
+    const [savedTemplates, setSavedTemplates] = useState<Record<string, BroadcastTemplateItem>>({});
+    const [templatesLoaded, setTemplatesLoaded] = useState(false);
+    const [savingTemplate, setSavingTemplate] = useState(false);
+    const [useDefaultBanner, setUseDefaultBanner] = useState(true);
+    const [showPasteNumbers, setShowPasteNumbers] = useState(false);
+    const [pastedNumbersText, setPastedNumbersText] = useState("");
+
+    // Modal de Seleção de Contatos Salvos
+    const [contactModalOpen, setContactModalOpen] = useState(false);
+    const [systemContacts, setSystemContacts] = useState<any[]>([]);
+    const [contactLoading, setContactLoading] = useState(false);
+    const [contactSearch, setContactSearch] = useState("");
+    const [selectedContactJids, setSelectedContactJids] = useState<Set<string>>(new Set());
+
     // Standard Mode State
     const [contacts, setContacts] = useState("");
-    const [message, setMessage] = useState("");
+    const [message, setMessage] = useState(DEFAULT_COLLECTIVE_TEMPLATES.fatura_atraso.content);
     const [standardFile, setStandardFile] = useState<File | null>(null);
     const [standardPreviewUrl, setStandardPreviewUrl] = useState<string | null>(null);
     const standardFileInputRef = useRef<HTMLInputElement>(null);
@@ -338,11 +400,19 @@ export default function BroadcastPage() {
             setCsvFileName(file.name);
             setContacts(phoneList.join("\n"));
 
+            // Converte os leads da planilha diretamente para as linhas da tabela de destinatários
+            const newCollectiveRows: CollectiveContactRow[] = extractedLeads.map((lead, idx) => ({
+                id: String(Date.now() + idx + Math.random()),
+                phone: lead.phone,
+                name: lead.company || ""
+            }));
+            setCollectiveRows(newCollectiveRows);
+
             const companiesCount = extractedLeads.filter(l => l.company).length;
             if (companiesCount > 0) {
-                toast.success(`${extractedLeads.length} leads importados (${companiesCount} com nome da empresa)!`);
+                toast.success(`${extractedLeads.length} clientes importados (${companiesCount} com nome identificado)!`);
             } else {
-                toast.info(`${extractedLeads.length} telefones importados. (Coluna com nome da empresa não identificada)`);
+                toast.info(`${extractedLeads.length} telefones importados para a tabela.`);
             }
         } catch (err) {
             console.error("Erro ao processar planilha:", err);
@@ -356,8 +426,242 @@ export default function BroadcastPage() {
         setCsvLeads([]);
         setCsvFileName(null);
         setContacts("");
+        setCollectiveRows([{ id: String(Date.now()), phone: "", name: "" }]);
         if (csvFileInputRef.current) csvFileInputRef.current.value = "";
-        toast.info("Planilha removida.");
+        toast.info("Planilha removida da tabela.");
+    };
+
+    // Ações das Linhas de Destinatários do Disparo Coletivo
+    const addCollectiveRow = () => {
+        setCollectiveRows(prev => [
+            ...prev,
+            { id: String(Date.now() + Math.random()), phone: "", name: "" }
+        ]);
+    };
+
+    const updateCollectiveRow = (id: string, updates: Partial<CollectiveContactRow>) => {
+        setCollectiveRows(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+    };
+
+    const removeCollectiveRow = (id: string) => {
+        setCollectiveRows(prev => {
+            if (prev.length <= 1) {
+                return [{ id: String(Date.now()), phone: "", name: "" }];
+            }
+            return prev.filter(r => r.id !== id);
+        });
+    };
+
+    const handleConvertPastedContactsToRows = () => {
+        const rawPhones = pastedNumbersText.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+        if (rawPhones.length === 0) {
+            toast.error("Nenhum número digitado para conversão.");
+            return;
+        }
+
+        const newRows: CollectiveContactRow[] = rawPhones.map((phone, idx) => ({
+            id: String(Date.now() + idx + Math.random()),
+            phone,
+            name: ""
+        }));
+
+        setCollectiveRows(prev => {
+            const hasEmptyFirst = prev.length === 1 && !prev[0].phone && !prev[0].name;
+            return hasEmptyFirst ? newRows : [...prev, ...newRows];
+        });
+        toast.success(`${newRows.length} contato(s) adicionado(s) à tabela!`);
+        setPastedNumbersText("");
+        setShowPasteNumbers(false);
+    };
+
+    // Carregar modelos de mensagens salvos no banco de dados
+    const loadTemplates = useCallback(async () => {
+        try {
+            const res = await fetch("/api/broadcast/templates");
+            if (res.ok) {
+                const data = await res.json();
+                if (Array.isArray(data.data)) {
+                    const map: Record<string, BroadcastTemplateItem> = {};
+                    data.data.forEach((item: BroadcastTemplateItem) => {
+                        map[item.templateKey] = item;
+                    });
+                    setSavedTemplates(map);
+                    if (map["fatura_atraso"]?.content) {
+                        setMessage(map["fatura_atraso"].content);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Falha ao carregar modelos de broadcast:", e);
+        } finally {
+            setTemplatesLoaded(true);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadTemplates();
+    }, [loadTemplates]);
+
+    // Trocar de modelo de mensagem
+    const handleSelectTemplate = (key: string) => {
+        setSelectedTemplateKey(key);
+        if (key === "custom") return;
+        const tmpl = savedTemplates[key]?.content || DEFAULT_COLLECTIVE_TEMPLATES[key]?.content;
+        if (tmpl) {
+            setMessage(tmpl);
+            toast.info(`Modelo "${DEFAULT_COLLECTIVE_TEMPLATES[key]?.title || key}" carregado.`);
+        }
+    };
+
+    // Salvar modelo no banco de dados com precisão
+    const handleSaveTemplateToDb = async () => {
+        if (!selectedTemplateKey || selectedTemplateKey === "custom") {
+            toast.error("Selecione um dos modelos específicos (Fatura em Atraso, Vencimento se Aproxima ou Vencimento Hoje) para salvar no banco de dados.");
+            return;
+        }
+        if (!message.trim()) {
+            toast.error("O texto da mensagem não pode estar vazio.");
+            return;
+        }
+
+        setSavingTemplate(true);
+        try {
+            const currentTitle = DEFAULT_COLLECTIVE_TEMPLATES[selectedTemplateKey]?.title || selectedTemplateKey;
+            const res = await fetch("/api/broadcast/templates", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    templateKey: selectedTemplateKey,
+                    title: currentTitle,
+                    content: message,
+                    category: "billing"
+                })
+            });
+
+            const data = await res.json();
+            if (res.ok && data.status) {
+                setSavedTemplates(prev => ({
+                    ...prev,
+                    [selectedTemplateKey]: data.data
+                }));
+                toast.success(`Modelo "${currentTitle}" salvo no banco de dados com precisão!`);
+            } else {
+                toast.error(data.message || "Erro ao salvar modelo no banco de dados.");
+            }
+        } catch (e) {
+            console.error("Erro ao salvar modelo:", e);
+            toast.error("Falha ao salvar modelo no banco de dados.");
+        } finally {
+            setSavingTemplate(false);
+        }
+    };
+
+    // Restaurar modelo original
+    const handleRestoreDefaultTemplate = () => {
+        if (selectedTemplateKey && DEFAULT_COLLECTIVE_TEMPLATES[selectedTemplateKey]) {
+            setMessage(DEFAULT_COLLECTIVE_TEMPLATES[selectedTemplateKey].content);
+            toast.info("Mensagem restaurada para o padrão oficial.");
+        }
+    };
+
+    // Seleção de Contatos Salvos no Sistema
+    const loadSystemContacts = async () => {
+        if (!sessionId) return;
+        setContactLoading(true);
+        try {
+            const res = await fetch(`/api/contacts/${sessionId}?limit=all`);
+            if (res.ok) {
+                const data = await res.json();
+                const list = Array.isArray(data.data) ? data.data : [];
+                setSystemContacts(list.filter((c: any) => !c.jid.endsWith("@g.us")));
+            } else {
+                toast.error("Erro ao carregar contatos do sistema.");
+            }
+        } catch (e) {
+            console.error("Falha ao carregar contatos:", e);
+            toast.error("Erro ao comunicar com a agenda de contatos.");
+        } finally {
+            setContactLoading(false);
+        }
+    };
+
+    const handleOpenContactModal = () => {
+        setSelectedContactJids(new Set());
+        setContactSearch("");
+        setContactModalOpen(true);
+        loadSystemContacts();
+    };
+
+    const handleSelectSingleContact = (contact: any) => {
+        const cleanPhone = contact.jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+        const contactName = contact.name || contact.notify || contact.verifiedName || "";
+        
+        setCollectiveRows(prev => {
+            const updated = [...prev];
+            updated[0] = {
+                id: updated[0]?.id || String(Date.now()),
+                phone: cleanPhone,
+                name: contactName
+            };
+            return updated;
+        });
+
+        setContactModalOpen(false);
+        toast.success(`Contato ${contactName || cleanPhone} selecionado com sucesso!`);
+    };
+
+    const handleToggleContactSelection = (jid: string) => {
+        setSelectedContactJids(prev => {
+            const next = new Set(prev);
+            if (next.has(jid)) next.delete(jid);
+            else next.add(jid);
+            return next;
+        });
+    };
+
+    const handleSelectAllFiltered = (filtered: any[]) => {
+        setSelectedContactJids(new Set(filtered.map(c => c.jid)));
+    };
+
+    const handleClearContactSelection = () => {
+        setSelectedContactJids(new Set());
+    };
+
+    const handleAddSelectedContactsToRows = () => {
+        if (selectedContactJids.size === 0) {
+            toast.warning("Nenhum contato selecionado.");
+            return;
+        }
+
+        const existingPhones = new Set(collectiveRows.map(r => r.phone.replace(/\D/g, "")).filter(Boolean));
+        const newRows: CollectiveContactRow[] = [];
+
+        systemContacts.forEach((contact, idx) => {
+            if (selectedContactJids.has(contact.jid)) {
+                const cleanPhone = contact.jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+                const cleanDigits = cleanPhone.replace(/\D/g, "");
+                if (cleanDigits && !existingPhones.has(cleanDigits)) {
+                    existingPhones.add(cleanDigits);
+                    newRows.push({
+                        id: String(Date.now() + idx + Math.random()),
+                        phone: cleanPhone,
+                        name: contact.name || contact.notify || contact.verifiedName || ""
+                    });
+                }
+            }
+        });
+
+        if (newRows.length === 0) {
+            toast.info("Os contatos selecionados já constam na tabela.");
+        } else {
+            setCollectiveRows(prev => {
+                const hasEmptyFirst = prev.length === 1 && !prev[0].phone && !prev[0].name;
+                return hasEmptyFirst ? newRows : [...prev, ...newRows];
+            });
+            toast.success(`${newRows.length} contato(s) adicionado(s) à tabela!`);
+        }
+
+        setContactModalOpen(false);
     };
 
     // Individual Rows Actions
@@ -563,92 +867,83 @@ export default function BroadcastPage() {
                 }
 
             } else {
-                // Standard mode
-                const rawContactList = contacts.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
-                const recipients = rawContactList.map(s => {
-                    return formatToBrazilPhoneJid(s);
+                // Modo Disparo Coletivo & Cobranças
+                const targetRows = collectiveTargetMode === "single"
+                    ? (collectiveRows[0]?.phone.trim().replace(/\D/g, "").length >= 8 ? [collectiveRows[0]] : [])
+                    : collectiveRows.filter(r => r.phone.trim().replace(/\D/g, "").length >= 8);
+
+                if (targetRows.length === 0) {
+                    toast.error("Informe pelo menos 1 número de WhatsApp válido para o envio.");
+                    setLoading(false);
+                    return;
+                }
+
+                if (!message.trim() && !standardFile && !useDefaultBanner) {
+                    toast.error("Digite o texto da mensagem ou selecione uma imagem/arquivo.");
+                    setLoading(false);
+                    return;
+                }
+
+                // Preparar imagem/anexo (arquivo personalizado ou banner profissional padrão)
+                let fileToSend: File | null = standardFile;
+                if (!fileToSend && useDefaultBanner) {
+                    try {
+                        const resp = await fetch("/fatura_atraso_default.jpg");
+                        const blob = await resp.blob();
+                        fileToSend = new File([blob], "aviso_fatura_nexus.jpg", { type: "image/jpeg" });
+                    } catch (e) {
+                        console.error("Não foi possível carregar o banner padrão, prosseguindo sem arquivo:", e);
+                    }
+                }
+
+                let formattedAmount = collectiveAmount.trim();
+                if (formattedAmount && !formattedAmount.startsWith("R$")) {
+                    formattedAmount = `R$ ${formattedAmount}`;
+                }
+
+                const pixReplacement = (sendPixSeparately && collectivePixCode.trim())
+                    ? "👇 (Enviado em mensagem separada a seguir para você copiar)"
+                    : (collectivePixCode.trim() || "");
+
+                const itemsMeta = targetRows.map((row) => {
+                    const formattedJid = formatToBrazilPhoneJid(row.phone);
+                    let itemMsg = message
+                        .replace(/\[NOME\]|{nome}/gi, row.name?.trim() || "")
+                        .replace(/\[VALOR\]|{valor}/gi, formattedAmount || "")
+                        .replace(/\[DATA\]|\[VENCIMENTO\]|{data}|{vencimento}/gi, collectiveDueDate.trim() || "")
+                        .replace(/\[PIX\]|{pix}/gi, pixReplacement)
+                        .replace(/\[TELEFONE\]|{telefone}/gi, row.phone.trim() || "");
+
+                    return {
+                        jid: formattedJid,
+                        name: row.name?.trim() || "",
+                        pix: collectivePixCode.trim() || "",
+                        message: itemMsg,
+                        hasFile: !!fileToSend,
+                        fileIndex: fileToSend ? 0 : -1
+                    };
                 });
 
-                if (recipients.length === 0) {
-                    toast.error("Nenhum destinatário válido informado");
-                    setLoading(false);
-                    return;
+                const formData = new FormData();
+                formData.append("mode", "individual");
+                formData.append("delay", String(delay[0]));
+                formData.append("sendPixSeparately", sendPixSeparately && collectivePixCode.trim() ? "true" : "false");
+                formData.append("items", JSON.stringify(itemsMeta));
+                if (fileToSend) {
+                    formData.append("file_0", fileToSend);
                 }
 
-                if (!message.trim() && !standardFile) {
-                    toast.error("Digite uma mensagem ou anexe um arquivo.");
-                    setLoading(false);
-                    return;
-                }
-
-                // Check if message has dynamic variables for CSV leads
-                const hasCompanyTag = /\[EMPRESA\]|{empresa}/i.test(message);
-                const hasPhoneTag = /\[TELEFONE\]|{telefone}/i.test(message);
-                const hasVariables = hasCompanyTag || hasPhoneTag;
-
-                let customMessages: string[] = [];
-                if (hasVariables && csvLeads.length > 0) {
-                    const companyByPhone = new Map<string, string>();
-                    csvLeads.forEach(lead => {
-                        const digits = lead.phone.replace(/\D/g, "");
-                        companyByPhone.set(digits, lead.company);
-                        if (digits.startsWith("55")) {
-                            companyByPhone.set(digits.slice(2), lead.company);
-                        } else {
-                            companyByPhone.set(`55${digits}`, lead.company);
-                        }
-                    });
-
-                    customMessages = rawContactList.map(rawPhone => {
-                        const digits = rawPhone.replace(/\D/g, "");
-                        const company = companyByPhone.get(digits) || companyByPhone.get(digits.startsWith("55") ? digits.slice(2) : `55${digits}`) || "";
-                        return message
-                            .replace(/\[EMPRESA\]|{empresa}/gi, company)
-                            .replace(/\[TELEFONE\]|{telefone}/gi, rawPhone);
-                    });
-                }
-
-                let res: Response;
-
-                if (standardFile) {
-                    const formData = new FormData();
-                    formData.append("mode", "standard");
-                    formData.append("recipients", JSON.stringify(recipients));
-                    formData.append("message", message.trim());
-                    formData.append("delay", String(delay[0]));
-                    formData.append("file", standardFile);
-                    if (customMessages.length > 0) {
-                        formData.append("customMessages", JSON.stringify(customMessages));
-                    }
-
-                    res = await fetch(`/api/messages/${sessionId}/broadcast`, {
-                        method: "POST",
-                        body: formData
-                    });
-                } else {
-                    const bodyPayload: any = {
-                        mode: "standard",
-                        recipients,
-                        message: message.trim(),
-                        delay: delay[0]
-                    };
-                    if (customMessages.length > 0) {
-                        bodyPayload.customMessages = customMessages;
-                    }
-
-                    res = await fetch(`/api/messages/${sessionId}/broadcast`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(bodyPayload)
-                    });
-                }
+                const res = await fetch(`/api/messages/${sessionId}/broadcast`, {
+                    method: "POST",
+                    body: formData
+                });
 
                 const data = await res.json();
 
                 if (res.ok) {
-                    toast.info(`Disparo iniciado para ${recipients.length} destinatários...`);
+                    toast.info(`Disparo coletivo iniciado para ${targetRows.length} destinatário${targetRows.length !== 1 ? "s" : ""}...`);
                 } else {
-                    toast.error(data.message || "Falha ao iniciar disparo");
+                    toast.error(data.message || "Falha ao iniciar disparo coletivo");
                     setLoading(false);
                 }
             }
@@ -659,13 +954,17 @@ export default function BroadcastPage() {
         }
     };
 
+    const collectiveValidRows = collectiveTargetMode === "single"
+        ? (collectiveRows[0]?.phone.trim().replace(/\D/g, "").length >= 8 ? [collectiveRows[0]] : [])
+        : collectiveRows.filter(r => r.phone.trim().replace(/\D/g, "").length >= 8);
+
     const recipientCount = broadcastMode === "individual"
         ? individualRows.filter(r => r.phone.trim().length >= 8).length
-        : contacts.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).length;
+        : collectiveValidRows.length;
 
     const filesCount = broadcastMode === "individual"
         ? individualRows.filter(r => r.file !== null).length
-        : standardFile ? 1 : 0;
+        : (standardFile || useDefaultBanner) ? 1 : 0;
 
     const formatJid = (jid: string) => {
         if (!jid) return "-";
@@ -749,7 +1048,7 @@ export default function BroadcastPage() {
                                             : "text-muted-foreground hover:text-foreground"
                                     }`}
                                 >
-                                    <Users className="h-3.5 w-3.5" /> Disparo Coletivo (Mesmo Arquivo)
+                                    <Users className="h-3.5 w-3.5" /> Disparo Coletivo & Cobranças
                                 </button>
                             </div>
                         </div>
@@ -1071,268 +1370,882 @@ export default function BroadcastPage() {
                             </div>
                         )}
 
-                        {/* MODE 2: STANDARD COLETIVO (Same File/Message) */}
+                        {/* MODE 2: DISPARO COLETIVO & COBRANÇAS */}
                         {broadcastMode === "standard" && (
-                            <div className="grid gap-6 grid-cols-1 lg:grid-cols-12">
-                                {/* Recipients Card (5 Cols) */}
-                                <Card className="lg:col-span-5 shadow-xs border-border/70">
-                                    <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-3">
+                            <div className="space-y-6">
+                                <div className="grid gap-6 grid-cols-1 lg:grid-cols-12">
+                                    {/* Destinatários Card (5 Cols) - Estilo Disparo de Boletos com WhatsApp e Nome Cliente */}
+                                    <Card className="lg:col-span-5 shadow-xs border-border/70 flex flex-col justify-between">
                                         <div>
-                                            <CardTitle className="text-base font-bold">Destinatários</CardTitle>
-                                            <CardDescription className="text-xs">
-                                                Insira os números ou importe uma planilha em CSV ou Excel (.xlsx).
-                                            </CardDescription>
-                                        </div>
-                                        <div>
-                                            <input
-                                                ref={csvFileInputRef}
-                                                type="file"
-                                                accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-                                                className="hidden"
-                                                onChange={handleSpreadsheetUpload}
-                                                disabled={loading}
-                                            />
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => csvFileInputRef.current?.click()}
-                                                className="h-8 text-xs gap-1.5 cursor-pointer font-semibold border-primary/30 text-primary hover:bg-primary/10"
-                                                disabled={loading}
-                                            >
-                                                <FileSpreadsheet className="h-3.5 w-3.5" /> Importar CSV / Excel
-                                            </Button>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent className="space-y-4">
-                                        {/* CSV Active Banner */}
-                                        {csvLeads.length > 0 && (
-                                            <div className="p-3 rounded-xl border border-primary/25 bg-primary/5 space-y-1.5">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2 min-w-0">
-                                                        <FileSpreadsheet className="h-4 w-4 text-primary shrink-0" />
-                                                        <span className="text-xs font-bold text-foreground truncate max-w-[170px]" title={csvFileName || ""}>
-                                                            {csvFileName || "leads.csv"}
-                                                        </span>
-                                                        <Badge variant="secondary" className="text-[10px] bg-primary/20 text-primary font-bold shrink-0">
-                                                            {csvLeads.length} leads
-                                                        </Badge>
+                                            <CardHeader className="flex flex-col gap-3 pb-3 border-b bg-muted/20">
+                                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                    <div>
+                                                        <CardTitle className="text-sm sm:text-base font-bold flex items-center gap-2">
+                                                            <Users className="h-4 w-4 text-primary" /> Destinatários do Disparo
+                                                        </CardTitle>
+                                                        <CardDescription className="text-xs mt-0.5">
+                                                            Envie para 1 número específico ou organize múltiplos contatos na tabela.
+                                                        </CardDescription>
                                                     </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleClearCsv}
-                                                        className="text-muted-foreground hover:text-red-500 p-0.5 cursor-pointer"
-                                                        title="Remover planilha CSV"
-                                                    >
-                                                        <X className="h-3.5 w-3.5" />
-                                                    </button>
-                                                </div>
-                                                <p className="text-[11px] text-muted-foreground leading-tight">
-                                                    {csvLeads.filter(l => l.company).length} com empresa identificada. Use <code className="bg-primary/10 text-primary px-1 py-0.5 rounded font-mono font-semibold">*[EMPRESA]*</code> na mensagem para personalizar o envio.
-                                                </p>
-                                            </div>
-                                        )}
 
-                                        <div className="space-y-2">
-                                            <Label className="text-xs font-semibold">Números de Destino</Label>
-                                            <Textarea
-                                                placeholder={"11987654321\n(11) 91234-5678\n552199887766"}
-                                                className="min-h-[200px] font-mono text-xs leading-relaxed"
-                                                value={contacts}
-                                                onChange={e => setContacts(e.target.value)}
-                                                disabled={loading}
-                                            />
-                                            <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
-                                                <span className="font-semibold text-primary">
-                                                    {recipientCount} contato{recipientCount !== 1 ? "s" : ""} identificado{recipientCount !== 1 ? "s" : ""}
-                                                </span>
-                                                <span className="text-[11px]">DDI +55 padronizado</span>
-                                            </div>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-
-                                {/* Message & Attachment Card (7 Cols) */}
-                                <Card className="lg:col-span-7 shadow-xs border-border/70">
-                                    <CardHeader>
-                                        <CardTitle className="text-base font-bold">Conteúdo Coletivo</CardTitle>
-                                        <CardDescription className="text-xs">
-                                            Escreva o texto e anexe uma imagem ou arquivo PDF comum a todos os contatos.
-                                        </CardDescription>
-                                    </CardHeader>
-                                    <CardContent className="space-y-4">
-                                        
-                                        {/* File Attachment Box */}
-                                        <div className="space-y-2">
-                                            <div className="flex items-center justify-between">
-                                                <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
-                                                    <Paperclip className="h-3.5 w-3.5 text-primary" /> Anexo (PDF ou Imagem)
-                                                </Label>
-                                                {standardFile && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleRemoveStandardFile}
-                                                        className="text-[11px] text-red-500 hover:text-red-700 flex items-center gap-1 cursor-pointer font-medium"
-                                                    >
-                                                        <X className="h-3 w-3" /> Remover anexo
-                                                    </button>
-                                                )}
-                                            </div>
-
-                                            {!standardFile ? (
-                                                <div
-                                                    onClick={() => standardFileInputRef.current?.click()}
-                                                    className="border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-primary/60 rounded-xl p-4 text-center cursor-pointer transition-all bg-slate-50/60 dark:bg-slate-900/30 hover:bg-primary/5"
-                                                >
-                                                    <input
-                                                        ref={standardFileInputRef}
-                                                        type="file"
-                                                        accept="image/*,application/pdf"
-                                                        className="hidden"
-                                                        onChange={handleStandardFileSelect}
-                                                        disabled={loading}
-                                                    />
-                                                    <div className="flex flex-col items-center gap-2">
-                                                        <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center">
-                                                            <UploadCloud className="h-5 w-5" />
-                                                        </div>
-                                                        <div>
-                                                            <p className="text-xs font-semibold text-foreground">
-                                                                Clique para anexar ou arraste o arquivo aqui
-                                                            </p>
-                                                            <p className="text-[11px] text-muted-foreground mt-0.5">
-                                                                Suporta <strong>PDF, PNG, JPG, JPEG, WEBP</strong> (até 25MB)
-                                                            </p>
-                                                        </div>
+                                                    {/* Toggle 1 Número vs Múltiplos Números */}
+                                                    <div className="flex items-center p-0.5 bg-background rounded-lg border shadow-2xs">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setCollectiveTargetMode("single")}
+                                                            className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
+                                                                collectiveTargetMode === "single"
+                                                                    ? "bg-primary text-primary-foreground shadow-xs"
+                                                                    : "text-muted-foreground hover:text-foreground"
+                                                            }`}
+                                                        >
+                                                            1 Número
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setCollectiveTargetMode("multiple")}
+                                                            className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
+                                                                collectiveTargetMode === "multiple"
+                                                                    ? "bg-primary text-primary-foreground shadow-xs"
+                                                                    : "text-muted-foreground hover:text-foreground"
+                                                            }`}
+                                                        >
+                                                            Vários Números
+                                                        </button>
                                                     </div>
                                                 </div>
-                                            ) : (
-                                                <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-card shadow-2xs">
-                                                    <div className="flex items-center gap-3 min-w-0">
-                                                        {standardPreviewUrl ? (
-                                                            <img
-                                                                src={standardPreviewUrl}
-                                                                alt="Preview"
-                                                                className="h-12 w-12 rounded-lg object-cover border shrink-0"
-                                                            />
-                                                        ) : (
-                                                            <div className="h-12 w-12 rounded-lg bg-red-50 dark:bg-red-950/30 text-red-600 flex flex-col items-center justify-center shrink-0 border border-red-200/60 dark:border-red-900/40">
-                                                                <FileText className="h-6 w-6" />
-                                                                <span className="text-[9px] font-bold mt-0.5 uppercase">PDF</span>
-                                                            </div>
-                                                        )}
-                                                        <div className="min-w-0">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className="font-semibold text-xs text-foreground truncate max-w-[180px] sm:max-w-[260px]">
-                                                                    {standardFile.name}
-                                                                </span>
-                                                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-medium">
-                                                                    {standardFile.type.startsWith("image/") ? "Imagem" : "Documento PDF"}
-                                                                </Badge>
-                                                            </div>
-                                                            <p className="text-[11px] text-muted-foreground mt-0.5">
-                                                                {formatFileSize(standardFile.size)} • Pronto para disparo
-                                                            </p>
-                                                        </div>
-                                                    </div>
 
+                                                {/* Toolbar de Ações Rápidas */}
+                                                <div className="flex items-center gap-1.5 flex-wrap pt-1">
                                                     <Button
                                                         type="button"
-                                                        variant="ghost"
                                                         size="sm"
-                                                        onClick={handleRemoveStandardFile}
-                                                        className="h-8 w-8 p-0 text-muted-foreground hover:text-red-600 cursor-pointer"
-                                                        title="Remover anexo"
+                                                        variant="outline"
+                                                        onClick={handleOpenContactModal}
+                                                        className="h-7 text-[11px] gap-1.5 font-semibold text-primary border-primary/30 hover:bg-primary/10 cursor-pointer"
+                                                        disabled={loading}
                                                     >
-                                                        <X className="h-4 w-4" />
+                                                        <UserCheck className="h-3.5 w-3.5" /> Selecionar Contatos Salvos
                                                     </Button>
+
+                                                    {collectiveTargetMode === "multiple" && (
+                                                        <>
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="outline"
+                                                                onClick={addCollectiveRow}
+                                                                className="h-7 text-[11px] gap-1 cursor-pointer font-semibold"
+                                                                disabled={loading}
+                                                            >
+                                                                <Plus className="h-3.5 w-3.5" /> Adicionar Cliente
+                                                            </Button>
+
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                onClick={() => setShowPasteNumbers(!showPasteNumbers)}
+                                                                className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                                                            >
+                                                                {showPasteNumbers ? "Ocultar Colar em Lote" : "Colar em Lote"}
+                                                            </Button>
+
+                                                            <input
+                                                                ref={csvFileInputRef}
+                                                                type="file"
+                                                                accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                                                                className="hidden"
+                                                                onChange={handleSpreadsheetUpload}
+                                                                disabled={loading}
+                                                            />
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={() => csvFileInputRef.current?.click()}
+                                                                className="h-7 text-[11px] gap-1 text-muted-foreground hover:text-foreground cursor-pointer"
+                                                                disabled={loading}
+                                                                title="Importar de arquivo CSV ou Excel"
+                                                            >
+                                                                <FileSpreadsheet className="h-3.5 w-3.5" /> CSV/Excel
+                                                            </Button>
+                                                        </>
+                                                    )}
                                                 </div>
-                                            )}
+                                            </CardHeader>
+
+                                            <CardContent className="p-4 space-y-3">
+                                                {/* Caixa para Colar Números em Lote se ativada */}
+                                                {showPasteNumbers && collectiveTargetMode === "multiple" && (
+                                                    <div className="p-3 rounded-xl border border-primary/30 bg-primary/5 space-y-2">
+                                                        <Label className="text-xs font-semibold text-primary flex items-center justify-between">
+                                                            <span>Colar lista de números (um por linha):</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setShowPasteNumbers(false)}
+                                                                className="text-[10px] text-muted-foreground hover:text-foreground"
+                                                            >
+                                                                Fechar
+                                                            </button>
+                                                        </Label>
+                                                        <Textarea
+                                                            placeholder={"(11) 98765-4321\n11912345678\n552199887766"}
+                                                            className="min-h-[80px] font-mono text-xs bg-background"
+                                                            value={pastedNumbersText}
+                                                            onChange={e => setPastedNumbersText(e.target.value)}
+                                                        />
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            onClick={handleConvertPastedContactsToRows}
+                                                            className="w-full h-7 text-xs font-semibold cursor-pointer"
+                                                        >
+                                                            Converter e Adicionar à Tabela
+                                                        </Button>
+                                                    </div>
+                                                )}
+
+                                                {/* CSV Leads Banner se houver */}
+                                                {csvLeads.length > 0 && (
+                                                    <div className="p-2.5 rounded-lg border border-primary/25 bg-primary/5 flex items-center justify-between text-xs">
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <FileSpreadsheet className="h-4 w-4 text-primary shrink-0" />
+                                                            <span className="font-semibold text-foreground truncate max-w-[150px]" title={csvFileName || ""}>
+                                                                {csvFileName || "planilha.csv"}
+                                                            </span>
+                                                            <Badge variant="secondary" className="text-[10px] bg-primary/20 text-primary font-bold">
+                                                                {csvLeads.length} leads
+                                                            </Badge>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleClearCsv}
+                                                            className="text-muted-foreground hover:text-red-500 p-0.5 cursor-pointer text-xs"
+                                                            title="Limpar planilha"
+                                                        >
+                                                            <X className="h-3.5 w-3.5" />
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                {/* MODO 1: ENVIAR PARA APENAS 1 NÚMERO */}
+                                                {collectiveTargetMode === "single" ? (
+                                                    <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 space-y-3.5">
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-xs font-semibold text-foreground">
+                                                                WhatsApp do Cliente <span className="text-red-500">*</span>
+                                                            </Label>
+                                                            <Input
+                                                                placeholder="(11) 98765-4321 ou 11987654321"
+                                                                value={collectiveRows[0]?.phone || ""}
+                                                                onChange={e => updateCollectiveRow(collectiveRows[0]?.id || "1", { phone: e.target.value })}
+                                                                className="h-9 text-xs font-mono bg-background"
+                                                                disabled={loading}
+                                                            />
+                                                        </div>
+
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-xs font-semibold text-foreground">
+                                                                Nome do Cliente (para preenchimento de <code className="text-primary font-mono text-[11px]">*&#91;NOME&#93;*</code>)
+                                                            </Label>
+                                                            <Input
+                                                                placeholder="Ex: Carlos Silva"
+                                                                value={collectiveRows[0]?.name || ""}
+                                                                onChange={e => updateCollectiveRow(collectiveRows[0]?.id || "1", { name: e.target.value })}
+                                                                className="h-9 text-xs bg-background"
+                                                                disabled={loading}
+                                                            />
+                                                        </div>
+
+                                                        <div className="pt-1">
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={handleOpenContactModal}
+                                                                className="w-full text-xs gap-1.5 h-8 font-medium cursor-pointer"
+                                                            >
+                                                                <Search className="h-3.5 w-3.5 text-primary" /> Buscar nos Contatos Salvos no Sistema
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    /* MODO 2: ENVIAR PARA DIVERSOS NÚMEROS (Tabela exatamente como no disparo de boletos, sem pix/valor/vencimento) */
+                                                    <div className="border rounded-xl overflow-hidden shadow-2xs">
+                                                        <div className="overflow-x-auto max-h-[380px]">
+                                                            <table className="w-full text-xs">
+                                                                <thead className="sticky top-0 bg-muted/90 backdrop-blur-xs z-10">
+                                                                    <tr className="border-b text-left text-muted-foreground">
+                                                                        <th className="py-2 px-2.5 font-semibold w-10 text-center">#</th>
+                                                                        <th className="py-2 px-2.5 font-semibold min-w-[140px]">WhatsApp</th>
+                                                                        <th className="py-2 px-2.5 font-semibold min-w-[140px]">Nome Cliente</th>
+                                                                        <th className="py-2 px-1.5 font-semibold w-10 text-center">Ação</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-border/40 bg-background">
+                                                                    {collectiveRows.map((row, index) => (
+                                                                        <tr key={row.id} className="hover:bg-muted/30 transition-colors">
+                                                                            <td className="py-2 px-2.5 text-center font-mono text-muted-foreground font-semibold">
+                                                                                {index + 1}
+                                                                            </td>
+                                                                            <td className="py-2 px-2.5">
+                                                                                <Input
+                                                                                    placeholder="(11) 98765-4321"
+                                                                                    value={row.phone}
+                                                                                    onChange={e => updateCollectiveRow(row.id, { phone: e.target.value })}
+                                                                                    className="h-7.5 text-xs font-mono"
+                                                                                    disabled={loading}
+                                                                                />
+                                                                            </td>
+                                                                            <td className="py-2 px-2.5">
+                                                                                <Input
+                                                                                    placeholder="Ex: Carlos Silva"
+                                                                                    value={row.name}
+                                                                                    onChange={e => updateCollectiveRow(row.id, { name: e.target.value })}
+                                                                                    className="h-7.5 text-xs"
+                                                                                    disabled={loading}
+                                                                                />
+                                                                            </td>
+                                                                            <td className="py-2 px-1.5 text-center">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => removeCollectiveRow(row.id)}
+                                                                                    className="text-muted-foreground hover:text-red-600 p-1 cursor-pointer transition-colors"
+                                                                                    title="Remover linha"
+                                                                                    disabled={loading}
+                                                                                >
+                                                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                                                </button>
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+
+                                                        <div className="p-2.5 border-t bg-muted/20 flex items-center justify-between">
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={addCollectiveRow}
+                                                                className="h-7 text-xs gap-1 font-semibold cursor-pointer"
+                                                                disabled={loading}
+                                                            >
+                                                                <Plus className="h-3.5 w-3.5" /> Adicionar Mais um Cliente
+                                                            </Button>
+
+                                                            <span className="text-[11px] font-semibold text-muted-foreground">
+                                                                {collectiveValidRows.length} cliente{collectiveValidRows.length !== 1 ? "s" : ""} válido{collectiveValidRows.length !== 1 ? "s" : ""}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </CardContent>
                                         </div>
 
-                                        {/* Message Textarea */}
-                                        <div className="space-y-2">
-                                            <div className="flex items-center justify-between flex-wrap gap-2">
-                                                <Label className="text-xs font-semibold">
-                                                    {standardFile ? "Legenda do Arquivo / Imagem" : "Mensagem de Texto"}
-                                                </Label>
-                                                {csvLeads.length > 0 && (
-                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                        {/* Rodapé informativo de contatos */}
+                                        <div className="px-4 py-2.5 border-t bg-muted/10 flex items-center justify-between text-[11px] text-muted-foreground">
+                                            <span className="flex items-center gap-1">
+                                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                                                Formato automático com DDI +55
+                                            </span>
+                                            <span className="font-semibold text-primary">
+                                                Total: {recipientCount} destinatário{recipientCount !== 1 ? "s" : ""}
+                                            </span>
+                                        </div>
+                                    </Card>
+
+                                    {/* Mensagem, Modelos & Imagem Profissional (7 Cols) */}
+                                    <Card className="lg:col-span-7 shadow-xs border-border/70">
+                                        <CardHeader className="py-3 px-5 border-b bg-muted/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                                            <div>
+                                                <CardTitle className="text-sm sm:text-base font-bold flex items-center gap-2">
+                                                    <Sparkles className="h-4 w-4 text-amber-500" /> Modelos & Conteúdo da Mensagem
+                                                </CardTitle>
+                                                <CardDescription className="text-xs">
+                                                    Escolha um modelo inteligente, personalize o texto e salve no banco de dados.
+                                                </CardDescription>
+                                            </div>
+
+                                            {/* Botão de Salvar no Banco de Dados */}
+                                            {selectedTemplateKey !== "custom" && (
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    onClick={handleSaveTemplateToDb}
+                                                    disabled={savingTemplate || loading}
+                                                    className="h-7.5 text-xs gap-1.5 font-semibold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-xs shrink-0"
+                                                >
+                                                    {savingTemplate ? (
+                                                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                                    ) : (
+                                                        <Save className="h-3.5 w-3.5" />
+                                                    )}
+                                                    Salvar no Banco de Dados
+                                                </Button>
+                                            )}
+                                        </CardHeader>
+
+                                        <CardContent className="p-5 space-y-4">
+                                            {/* Seletor de Modelos Pré-Configurados */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <Label className="text-xs font-semibold text-foreground">
+                                                        Modelos Pré-Configurados:
+                                                    </Label>
+                                                    {selectedTemplateKey !== "custom" && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleRestoreDefaultTemplate}
+                                                            className="text-[11px] text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                                                        >
+                                                            <RefreshCw className="h-3 w-3" /> Restaurar Padrão
+                                                        </button>
+                                                    )}
+                                                </div>
+
+                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectTemplate("fatura_atraso")}
+                                                        className={`p-2 rounded-lg text-left text-xs font-semibold transition-all border cursor-pointer ${
+                                                            selectedTemplateKey === "fatura_atraso"
+                                                                ? "bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-400 shadow-2xs"
+                                                                : "bg-background hover:bg-muted/50 text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 font-bold truncate">
+                                                            <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                                            <span>Fatura em Atraso</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate font-normal">
+                                                            Aviso de pendência
+                                                        </p>
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectTemplate("vencimento_proximo")}
+                                                        className={`p-2 rounded-lg text-left text-xs font-semibold transition-all border cursor-pointer ${
+                                                            selectedTemplateKey === "vencimento_proximo"
+                                                                ? "bg-blue-500/10 border-blue-500/40 text-blue-700 dark:text-blue-400 shadow-2xs"
+                                                                : "bg-background hover:bg-muted/50 text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 font-bold truncate">
+                                                            <Clock className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                                                            <span>Vence em Breve</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate font-normal">
+                                                            Lembrete prévio
+                                                        </p>
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleSelectTemplate("vencimento_hoje")}
+                                                        className={`p-2 rounded-lg text-left text-xs font-semibold transition-all border cursor-pointer ${
+                                                            selectedTemplateKey === "vencimento_hoje"
+                                                                ? "bg-rose-500/10 border-rose-500/40 text-rose-700 dark:text-rose-400 shadow-2xs"
+                                                                : "bg-background hover:bg-muted/50 text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 font-bold truncate">
+                                                            <Calendar className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                                                            <span>Vencimento Hoje</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate font-normal">
+                                                            Aviso do dia
+                                                        </p>
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setSelectedTemplateKey("custom")}
+                                                        className={`p-2 rounded-lg text-left text-xs font-semibold transition-all border cursor-pointer ${
+                                                            selectedTemplateKey === "custom"
+                                                                ? "bg-primary/10 border-primary/40 text-primary shadow-2xs"
+                                                                : "bg-background hover:bg-muted/50 text-muted-foreground"
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-1.5 font-bold truncate">
+                                                            <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+                                                            <span>Mensagem Livre</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground mt-0.5 truncate font-normal">
+                                                            Texto personalizado
+                                                        </p>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Textarea da Mensagem */}
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between flex-wrap gap-2">
+                                                    <Label className="text-xs font-semibold">
+                                                        Texto da Mensagem:
+                                                    </Label>
+                                                    <div className="flex items-center gap-1 flex-wrap">
                                                         <span className="text-[10px] text-muted-foreground font-medium">Inserir:</span>
                                                         <Button
                                                             type="button"
                                                             variant="outline"
                                                             size="sm"
-                                                            onClick={() => setMessage(prev => prev + (prev.endsWith(" ") || !prev ? "" : " ") + "*[EMPRESA]*")}
-                                                            className="h-6 text-[10px] px-2 gap-1 cursor-pointer font-medium"
+                                                            onClick={() => setMessage(prev => prev + " *[NOME]*")}
+                                                            className="h-6 text-[10px] px-1.5 gap-1 cursor-pointer font-medium"
                                                         >
-                                                            + Empresa (*&#91;EMPRESA&#93;*)
+                                                            + Nome
                                                         </Button>
                                                         <Button
                                                             type="button"
                                                             variant="outline"
                                                             size="sm"
-                                                            onClick={() => setMessage(prev => prev + (prev.endsWith(" ") || !prev ? "" : " ") + "*[TELEFONE]*")}
-                                                            className="h-6 text-[10px] px-2 gap-1 cursor-pointer font-medium"
+                                                            onClick={() => setMessage(prev => prev + " *[VALOR]*")}
+                                                            className="h-6 text-[10px] px-1.5 gap-1 cursor-pointer font-medium"
                                                         >
-                                                            + Telefone (*&#91;TELEFONE&#93;*)
+                                                            + Valor
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setMessage(prev => prev + " *[DATA]*")}
+                                                            className="h-6 text-[10px] px-1.5 gap-1 cursor-pointer font-medium"
+                                                        >
+                                                            + Vencimento
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setMessage(prev => prev + " [PIX]")}
+                                                            className="h-6 text-[10px] px-1.5 gap-1 cursor-pointer font-medium"
+                                                        >
+                                                            + Pix
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => setMessage(prev => prev + " *[TELEFONE]*")}
+                                                            className="h-6 text-[10px] px-1.5 gap-1 cursor-pointer font-medium"
+                                                        >
+                                                            + Tel
                                                         </Button>
                                                     </div>
-                                                )}
-                                            </div>
-                                            <Textarea
-                                                placeholder={standardFile ? "Digite uma legenda para a imagem (ex: Olá equipe da [EMPRESA], segue nossa proposta...)..." : "Digite a mensagem do disparo aqui..."}
-                                                className="min-h-[120px] text-sm leading-relaxed"
-                                                value={message}
-                                                onChange={e => setMessage(e.target.value)}
-                                                disabled={loading}
-                                            />
-                                            {csvLeads.length > 0 && (
-                                                <p className="text-[11px] text-muted-foreground">
-                                                    A tag <code className="bg-muted px-1.5 py-0.5 rounded font-mono text-[10px] text-primary font-semibold">*&#91;EMPRESA&#93;*</code> será substituída pelo nome da empresa de cada lead importado da planilha.
-                                                </p>
-                                            )}
-                                        </div>
-
-                                        {/* Delay & Send */}
-                                        <div className="space-y-4 pt-2">
-                                            <div className="space-y-2 p-3 rounded-lg bg-muted/40 border border-border/50">
-                                                <div className="flex justify-between items-center text-xs">
-                                                    <Label className="font-semibold">Intervalo de Segurança (Delay):</Label>
-                                                    <span className="font-mono font-bold text-primary">{(delay[0] / 1000).toFixed(1)}s</span>
                                                 </div>
-                                                <Slider
-                                                    defaultValue={[2000]}
-                                                    min={1000}
-                                                    max={15000}
-                                                    step={500}
-                                                    value={delay}
-                                                    onValueChange={setDelay}
+
+                                                <Textarea
+                                                    placeholder="Digite a mensagem do disparo..."
+                                                    className="min-h-[140px] text-xs font-mono leading-relaxed bg-background"
+                                                    value={message}
+                                                    onChange={e => setMessage(e.target.value)}
                                                     disabled={loading}
-                                                    className="cursor-pointer"
                                                 />
                                             </div>
 
-                                            <Button
-                                                className="w-full font-semibold h-11 text-sm shadow-sm cursor-pointer"
-                                                onClick={handleSend}
-                                                disabled={loading || !sessionId || recipientCount === 0 || (!message.trim() && !standardFile)}
-                                            >
-                                                {loading ? (
-                                                    <>
-                                                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Disparando mensagens...
-                                                    </>
+                                            {/* Parâmetros Globais Opcionais (Preenchem [VALOR], [DATA] e [PIX]) */}
+                                            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/30 space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                                                        <DollarSign className="h-3.5 w-3.5 text-emerald-600" /> Dados da Cobrança / Fatura (Opcional):
+                                                    </span>
+                                                    <span className="text-[10px] text-muted-foreground">Preenche as variáveis do texto</span>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                                    <div>
+                                                        <Label className="text-[11px] text-muted-foreground font-medium">Valor Total:</Label>
+                                                        <Input
+                                                            placeholder="R$ 150,00"
+                                                            value={collectiveAmount}
+                                                            onChange={e => setCollectiveAmount(e.target.value)}
+                                                            className="h-7.5 text-xs bg-background mt-1"
+                                                            disabled={loading}
+                                                        />
+                                                    </div>
+
+                                                    <div>
+                                                        <Label className="text-[11px] text-muted-foreground font-medium">Data de Vencimento:</Label>
+                                                        <Input
+                                                            placeholder="10/10/2026 ou Hoje"
+                                                            value={collectiveDueDate}
+                                                            onChange={e => setCollectiveDueDate(e.target.value)}
+                                                            className="h-7.5 text-xs bg-background mt-1"
+                                                            disabled={loading}
+                                                        />
+                                                    </div>
+
+                                                    <div>
+                                                        <Label className="text-[11px] text-muted-foreground font-medium">Chave Pix Copia e Cola:</Label>
+                                                        <Input
+                                                            placeholder="00020126... ou Chave Pix"
+                                                            value={collectivePixCode}
+                                                            onChange={e => setCollectivePixCode(e.target.value)}
+                                                            className="h-7.5 text-xs font-mono bg-background mt-1"
+                                                            disabled={loading}
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                {/* Switch Pix Separado */}
+                                                <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 dark:border-slate-800/60">
+                                                    <div className="space-y-0.5 pr-2">
+                                                        <Label htmlFor="collective-pix-sep" className="text-xs font-semibold cursor-pointer">
+                                                            Enviar Código Pix em mensagem separada logo após o aviso
+                                                        </Label>
+                                                        <p className="text-[10px] text-muted-foreground">
+                                                            Permite ao cliente copiar a chave PIX com 1 toque no celular sem copiar o texto junto.
+                                                        </p>
+                                                    </div>
+                                                    <Switch
+                                                        id="collective-pix-sep"
+                                                        checked={sendPixSeparately}
+                                                        onCheckedChange={setSendPixSeparately}
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {/* Imagem Profissional de Fatura / Aviso de Cobrança */}
+                                            <div className="space-y-2 pt-1">
+                                                <Label className="text-xs font-semibold flex items-center justify-between">
+                                                    <span className="flex items-center gap-1.5">
+                                                        <ImageIcon className="h-3.5 w-3.5 text-primary" /> Imagem Profissional do Disparo
+                                                    </span>
+                                                    {standardFile && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleRemoveStandardFile}
+                                                            className="text-[11px] text-red-500 hover:text-red-700 flex items-center gap-1 cursor-pointer font-medium"
+                                                        >
+                                                            <X className="h-3 w-3" /> Remover arquivo próprio
+                                                        </button>
+                                                    )}
+                                                </Label>
+
+                                                {/* Se tiver arquivo próprio carregado */}
+                                                {standardFile ? (
+                                                    <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-card shadow-2xs">
+                                                        <div className="flex items-center gap-3 min-w-0">
+                                                            {standardPreviewUrl ? (
+                                                                <img
+                                                                    src={standardPreviewUrl}
+                                                                    alt="Preview"
+                                                                    className="h-12 w-12 rounded-lg object-cover border shrink-0"
+                                                                />
+                                                            ) : (
+                                                                <div className="h-12 w-12 rounded-lg bg-red-50 dark:bg-red-950/30 text-red-600 flex flex-col items-center justify-center shrink-0 border border-red-200/60 dark:border-red-900/40">
+                                                                    <FileText className="h-6 w-6" />
+                                                                    <span className="text-[9px] font-bold mt-0.5 uppercase">PDF</span>
+                                                                </div>
+                                                            )}
+                                                            <div className="min-w-0">
+                                                                <span className="font-semibold text-xs text-foreground truncate block max-w-[220px]">
+                                                                    {standardFile.name}
+                                                                </span>
+                                                                <p className="text-[11px] text-muted-foreground mt-0.5">
+                                                                    {formatFileSize(standardFile.size)} • Arquivo próprio anexado
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={handleRemoveStandardFile}
+                                                            className="h-8 w-8 p-0 text-muted-foreground hover:text-red-600 cursor-pointer"
+                                                        >
+                                                            <X className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                ) : useDefaultBanner ? (
+                                                    /* Banner Profissional Padrão */
+                                                    <div className="p-3 rounded-xl border border-primary/25 bg-primary/5 space-y-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2">
+                                                                <Badge className="bg-primary text-primary-foreground text-[10px] font-semibold border-0">
+                                                                    Banner Profissional Integrado
+                                                                </Badge>
+                                                                <span className="text-[11px] text-muted-foreground">Alta Resolução • Design Executivo</span>
+                                                            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setUseDefaultBanner(false)}
+                                                                className="text-[11px] text-muted-foreground hover:text-red-500 cursor-pointer"
+                                                            >
+                                                                Não enviar imagem
+                                                            </button>
+                                                        </div>
+
+                                                        <div className="relative rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 max-h-[140px] bg-slate-950">
+                                                            <img
+                                                                src="/fatura_atraso_default.jpg"
+                                                                alt="Banner de Fatura em Atraso"
+                                                                className="w-full h-full object-cover max-h-[140px]"
+                                                            />
+                                                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent flex items-end p-2.5">
+                                                                <span className="text-[11px] text-white font-medium">
+                                                                    Arte profissional de fatura e cobrança pronta para envio no WhatsApp
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex items-center justify-between pt-1">
+                                                            <input
+                                                                ref={standardFileInputRef}
+                                                                type="file"
+                                                                accept="image/*,application/pdf"
+                                                                className="hidden"
+                                                                onChange={handleStandardFileSelect}
+                                                                disabled={loading}
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => standardFileInputRef.current?.click()}
+                                                                className="text-xs text-primary font-medium hover:underline flex items-center gap-1 cursor-pointer"
+                                                            >
+                                                                <UploadCloud className="h-3.5 w-3.5" /> Trocar por Imagem Própria ou PDF
+                                                            </button>
+                                                        </div>
+                                                    </div>
                                                 ) : (
-                                                    <>
-                                                        <Send className="mr-2 h-4 w-4" /> Iniciar Disparo Coletivo ({recipientCount})
-                                                    </>
+                                                    /* Estado sem imagem */
+                                                    <div className="p-3.5 rounded-xl border border-dashed text-center space-y-2 bg-muted/20">
+                                                        <p className="text-xs text-muted-foreground">Nenhuma imagem selecionada (o disparo enviará apenas texto).</p>
+                                                        <div className="flex items-center justify-center gap-2">
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => setUseDefaultBanner(true)}
+                                                                className="h-7 text-xs font-semibold cursor-pointer text-primary"
+                                                            >
+                                                                <Sparkles className="h-3 w-3 mr-1" /> Usar Banner Profissional Nexus
+                                                            </Button>
+                                                            <Button
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => standardFileInputRef.current?.click()}
+                                                                className="h-7 text-xs cursor-pointer"
+                                                            >
+                                                                <Paperclip className="h-3 w-3 mr-1" /> Carregar Arquivo
+                                                            </Button>
+                                                        </div>
+                                                    </div>
                                                 )}
-                                            </Button>
-                                        </div>
-                                    </CardContent>
-                                </Card>
+                                            </div>
+
+                                            {/* Delay e Botão de Disparo */}
+                                            <div className="space-y-4 pt-3 border-t">
+                                                <div className="space-y-2 p-3 rounded-xl bg-muted/40 border border-border/50">
+                                                    <div className="flex justify-between items-center text-xs">
+                                                        <Label className="font-semibold">Intervalo de Segurança (Delay anti-ban):</Label>
+                                                        <span className="font-mono font-bold text-primary">{(delay[0] / 1000).toFixed(1)}s</span>
+                                                    </div>
+                                                    <Slider
+                                                        defaultValue={[2000]}
+                                                        min={1000}
+                                                        max={15000}
+                                                        step={500}
+                                                        value={delay}
+                                                        onValueChange={setDelay}
+                                                        disabled={loading}
+                                                        className="cursor-pointer"
+                                                    />
+                                                </div>
+
+                                                <Button
+                                                    className="w-full font-bold h-12 text-sm shadow-md cursor-pointer bg-primary hover:bg-primary/90"
+                                                    onClick={handleSend}
+                                                    disabled={loading || !sessionId || recipientCount === 0 || (!message.trim() && !standardFile && !useDefaultBanner)}
+                                                >
+                                                    {loading ? (
+                                                        <>
+                                                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Disparando mensagens...
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Send className="mr-2 h-4 w-4" /> Iniciar Disparo Coletivo ({recipientCount} Destinatário{recipientCount !== 1 ? "s" : ""})
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
                             </div>
                         )}
+
+                        {/* Modal para Selecionar Contatos Salvos no Sistema */}
+                        <Dialog open={contactModalOpen} onOpenChange={setContactModalOpen}>
+                            <DialogContent className="max-w-md sm:max-w-lg p-0 overflow-hidden">
+                                <DialogHeader className="p-4 border-b bg-muted/20">
+                                    <DialogTitle className="text-sm sm:text-base font-bold flex items-center gap-2">
+                                        <Users className="h-4 w-4 text-primary" /> Contatos Salvos no Sistema
+                                    </DialogTitle>
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                        Selecione os clientes cadastrados no NEXUS Chat para adicionar ao disparo.
+                                    </p>
+                                </DialogHeader>
+
+                                <div className="p-4 space-y-3">
+                                    {/* Busca */}
+                                    <div className="relative">
+                                        <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                        <Input
+                                            placeholder="Buscar por nome ou telefone..."
+                                            value={contactSearch}
+                                            onChange={e => setContactSearch(e.target.value)}
+                                            className="pl-9 h-8 text-xs bg-background"
+                                        />
+                                    </div>
+
+                                    {/* Controles para Seleção Múltipla */}
+                                    {collectiveTargetMode === "multiple" && (
+                                        <div className="flex items-center justify-between text-xs pt-1">
+                                            <span className="font-semibold text-muted-foreground">
+                                                {selectedContactJids.size} contato(s) selecionado(s)
+                                            </span>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const query = contactSearch.toLowerCase().trim();
+                                                        const filtered = systemContacts.filter(c => {
+                                                            const name = (c.name || c.notify || c.verifiedName || "").toLowerCase();
+                                                            const jid = (c.jid || "").toLowerCase();
+                                                            return !query || name.includes(query) || jid.includes(query);
+                                                        });
+                                                        handleSelectAllFiltered(filtered);
+                                                    }}
+                                                    className="text-primary hover:underline text-xs font-semibold cursor-pointer"
+                                                >
+                                                    Marcar Todos
+                                                </button>
+                                                <span>•</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleClearContactSelection}
+                                                    className="text-muted-foreground hover:underline text-xs cursor-pointer"
+                                                >
+                                                    Desmarcar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Lista de Contatos com Scroll */}
+                                    <div className="border rounded-xl divide-y overflow-y-auto max-h-[300px]">
+                                        {contactLoading ? (
+                                            <div className="p-8 text-center text-xs text-muted-foreground space-y-2">
+                                                <RefreshCw className="h-5 w-5 animate-spin mx-auto text-primary" />
+                                                <p>Carregando contatos do sistema...</p>
+                                            </div>
+                                        ) : (() => {
+                                            const query = contactSearch.toLowerCase().trim();
+                                            const filtered = systemContacts.filter(c => {
+                                                const name = (c.name || c.notify || c.verifiedName || "").toLowerCase();
+                                                const jid = (c.jid || "").toLowerCase();
+                                                return !query || name.includes(query) || jid.includes(query);
+                                            });
+
+                                            if (filtered.length === 0) {
+                                                return (
+                                                    <div className="p-8 text-center text-xs text-muted-foreground">
+                                                        Nenhum contato encontrado{query ? ` para "${contactSearch}"` : ""}.
+                                                    </div>
+                                                );
+                                            }
+
+                                            return filtered.map((c) => {
+                                                const cleanPhone = c.jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+                                                const displayName = c.name || c.notify || c.verifiedName || cleanPhone;
+                                                const isSelected = selectedContactJids.has(c.jid);
+
+                                                return (
+                                                    <div
+                                                        key={c.jid}
+                                                        onClick={() => {
+                                                            if (collectiveTargetMode === "single") {
+                                                                handleSelectSingleContact(c);
+                                                            } else {
+                                                                handleToggleContactSelection(c.jid);
+                                                            }
+                                                        }}
+                                                        className={`p-2.5 flex items-center justify-between gap-3 hover:bg-muted/40 cursor-pointer transition-colors ${
+                                                            isSelected ? "bg-primary/5" : ""
+                                                        }`}
+                                                    >
+                                                        <div className="flex items-center gap-2.5 min-w-0">
+                                                            {collectiveTargetMode === "multiple" && (
+                                                                <div className="shrink-0">
+                                                                    {isSelected ? (
+                                                                        <CheckSquare className="h-4 w-4 text-primary" />
+                                                                    ) : (
+                                                                        <Square className="h-4 w-4 text-muted-foreground" />
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                            <Avatar className="h-8 w-8 shrink-0">
+                                                                {c.profilePic && <AvatarImage src={c.profilePic} />}
+                                                                <AvatarFallback className="text-[10px] font-bold bg-primary/10 text-primary">
+                                                                    {displayName.slice(0, 2).toUpperCase()}
+                                                                </AvatarFallback>
+                                                            </Avatar>
+                                                            <div className="min-w-0">
+                                                                <p className="text-xs font-semibold text-foreground truncate">
+                                                                    {displayName}
+                                                                </p>
+                                                                <p className="text-[11px] font-mono text-muted-foreground">
+                                                                    {cleanPhone}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+
+                                                        {collectiveTargetMode === "single" && (
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="h-7 text-[11px] text-primary hover:text-primary font-semibold"
+                                                            >
+                                                                Selecionar
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                );
+                                            });
+                                        })()}
+                                    </div>
+                                </div>
+
+                                {collectiveTargetMode === "multiple" && (
+                                    <div className="p-3 border-t bg-muted/20 flex items-center justify-end gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setContactModalOpen(false)}
+                                            className="h-8 text-xs cursor-pointer"
+                                        >
+                                            Cancelar
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            onClick={handleAddSelectedContactsToRows}
+                                            disabled={selectedContactJids.size === 0}
+                                            className="h-8 text-xs font-semibold cursor-pointer"
+                                        >
+                                            Adicionar {selectedContactJids.size} Contato{selectedContactJids.size !== 1 ? "s" : ""} à Tabela
+                                        </Button>
+                                    </div>
+                                )}
+                            </DialogContent>
+                        </Dialog>
 
                         {/* Live Progress Card */}
                         {broadcastProgress && (

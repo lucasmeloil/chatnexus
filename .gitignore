@@ -48,3 +48,4 @@ next-env.d.ts
 server.log
 /logs/
 scratch-*.ts
+*.tar.gz

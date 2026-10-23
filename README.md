@@ -18,6 +18,7 @@
 ---
 
 ## 📋 Sumário
+
 - [Sobre o NEXUS Chat](#-sobre-o-nexus-chat)
 - [Arquitetura e Tecnologias](#-arquitetura-e-tecnologias)
 - [Principais Funcionalidades](#-principais-funcionalidades)
@@ -55,6 +56,7 @@ graph TD
 ```
 
 ### Stack Tecnológica:
+
 - **Core Framework**: [Next.js 16](https://nextjs.org/) (App Router, Turbopack)
 - **Biblioteca de UI**: [React 19](https://react.dev/) + [Tailwind CSS](https://tailwindcss.com/)
 - **Componentes**: [Radix UI](https://www.radix-ui.com/) + [Lucide Icons](https://lucide.dev/)
@@ -70,17 +72,20 @@ graph TD
 ## 🔥 Principais Funcionalidades
 
 ### 1. 👥 Atendimento Multiatendente com Isolamento de Privacidade
+
 - **Fila de Espera Automática**: Novas conversas de clientes entram na fila de espera com alertas visuais e sonoros para toda a equipe.
 - **Atendimento Exclusivo**: Ao clicar em **"Aceitar Atendimento"**, o cliente fica vinculado exclusivamente ao operador. Outros atendentes comuns não visualizam o conteúdo nem podem interferir, garantindo conformidade e privacidade.
-- **Transferência Ágil**: Permite transferir a conversa para outro atendente ou redistribuir por setor (*Comercial, Suporte, Financeiro, Pessoal*) com mensagem explicativa opcional para o cliente.
+- **Transferência Ágil**: Permite transferir a conversa para outro atendente ou redistribuir por setor (_Comercial, Suporte, Financeiro, Pessoal_) com mensagem explicativa opcional para o cliente.
 - **Encerramento Profissional**: Finalização do atendimento com adição automática da etiqueta `#Finalizado` e envio opcional de mensagem formal de conclusão.
 
 ### 2. 📇 Gestão Inteligente de Contatos
+
 - **Detecção de Contato Não Salvo**: Alerta visual no cabeçalho e botão de ação rápida para salvar contatos não cadastrados na agenda do sistema em 1 clique.
 - **Foto de Perfil em Alta Resolução**: Carregamento em segundo plano da foto pública do WhatsApp e possibilidade de upload de foto customizada.
 - **Cadastro Completo**: Suporte a Nome, Empresa, Setor/Tag e Observações internas por cliente.
 
 ### 3. 💬 Experiência de Chat Rica e Moderna
+
 - **Gravação de Áudio PTT**: Gravador de voz integrado com contagem de tempo e envio imediato no formato oficial de nota de voz do WhatsApp.
 - **Mídias Diversificadas**: Envio e pré-visualização de Imagens, Vídeos, Documentos (PDF, DOCX, XLSX, etc.) e Figurinhas (Stickers).
 - **Citação de Mensagens (Reply)**: Responder a mensagens específicas com contexto visual destacado.
@@ -88,14 +93,17 @@ graph TD
 - **Anti-Delete de Mensagens**: Mensagens apagadas pelo remetente são preservadas no banco com o selo de proteção `🛡️ [Deleted by sender — preserved]`.
 
 ### 4. 🏷️ Etiquetas (Labels) e Respostas Rápidas (Quick Replies)
+
 - **Etiquetas Coloridas**: Categorização ágil de chats para organização comercial e de suporte.
 - **Quick Replies**: Envio de mensagens frequentes digitando `/` no campo de texto ou selecionando no menu rápido.
 
 ### 5. 📢 Broadcast e Disparos em Massa
+
 - Envio em massa com intervalo aleatório inteligente (10 a 30 segundos) para prevenir bloqueios de conta pela Meta.
 - Filtro por etiquetas e status de atendimento.
 
 ### 6. ⏰ Agendamento de Mensagens (Scheduler)
+
 - Agendamento de envios com data e horário futuros, incluindo suporte a arquivos de mídia.
 
 ---
@@ -142,10 +150,12 @@ NexusChat/
 ## ⚙️ Guia de Instalação e Execução
 
 ### 1. Pré-requisitos
+
 - **Node.js**: Versão 20.x ou superior (v22/v24 recomendada)
 - **MySQL**: 8.0 ou superior (rodando localmente ou via container Docker na porta `3306`)
 
 ### 2. Clonar e Instalar Dependências
+
 ```bash
 # Entrar no diretório do projeto
 cd d:/NexusChat
@@ -155,7 +165,9 @@ npm install
 ```
 
 ### 3. Configurar o Banco de Dados
+
 Certifique-se de que o MySQL está em execução e sincronize as tabelas:
+
 ```bash
 # Cria e atualiza as tabelas no MySQL conforme o schema.prisma
 npx prisma db push
@@ -165,14 +177,18 @@ npx prisma generate
 ```
 
 ### 4. Executar em Modo de Desenvolvimento
+
 ```bash
 npm run dev
 ```
+
 O servidor inicializará o backend Express com Socket.IO e o Next.js na porta **3000**:
+
 - **Painel do NEXUS Chat**: [http://localhost:3000](http://localhost:3000)
 - **Documentação da API**: [http://localhost:3000/docs](http://localhost:3000/docs)
 
 ### 5. Compilação para Produção
+
 ```bash
 # Compilar projeto Next.js
 npm run build
@@ -221,6 +237,7 @@ NEXT_PUBLIC_SWAGGER_PASSWORD=admin_docs_pass
 O NEXUS Chat suporta envio de webhooks em tempo real para automações externas.
 
 ### Principais Eventos Emitidos:
+
 - `message.received`: Disparado imediatamente quando uma mensagem é recebida de um cliente.
 - `message.sent`: Disparado quando uma mensagem é enviada pelo atendente ou bot.
 - `message.deleted`: Disparado quando um usuário apaga uma mensagem.
@@ -232,6 +249,7 @@ O NEXUS Chat suporta envio de webhooks em tempo real para automações externas.
 ## 📘 Documentação OpenAPI / Swagger
 
 O sistema inclui documentação interativa completa de todas as rotas da API em `/docs`.
+
 - **Acesso**: Navegue até [http://localhost:3000/docs](http://localhost:3000/docs)
 - **Autenticação da API**: As rotas protegidas utilizam cabeçalho `Authorization: Bearer <API_KEY>` ou sessão autenticada.
 
@@ -242,6 +260,7 @@ O sistema inclui documentação interativa completa de todas as rotas da API em 
 Esta seção registra toda a infraestrutura provisionada e o roteiro exato para quando for conectar o domínio corporativo com SSL (HTTPS).
 
 ### 📍 Informações da Instância Provisionada (Oracle Cloud)
+
 - **Região**: Brasil Leste (São Paulo - `sa-saopaulo-1`)
 - **Instância**: `nexus-chat-server` (Always Free)
 - **Sistema Operacional**: Ubuntu 22.04 LTS
@@ -257,11 +276,13 @@ Esta seção registra toda a infraestrutura provisionada e o roteiro exato para 
 ### 💻 Conexão e Manutenção Básica
 
 #### 1. Conectar via SSH pelo Windows (PowerShell):
+
 ```powershell
 ssh -i "C:\Users\nexus\Downloads\ssh-key-2026-10-11.key" ubuntu@163.176.47.244
 ```
 
 #### 2. Comandos Operacionais no Servidor:
+
 ```bash
 # Ver status do processo
 pm2 status
@@ -284,7 +305,9 @@ pm2 start nexus-chat
 Quando você adquirir ou for vincular o domínio/subdomínio, siga os passos abaixo:
 
 #### Passo 1: Apontamento no Painel de DNS
+
 No painel do seu registrador de domínio (Cloudflare, Registro.br, GoDaddy, Hostgator, etc.):
+
 - Crie uma entrada do **Tipo A**:
   - **Nome/Host**: `chat` (ou `@` se for domínio raiz)
   - **Tipo**: `A`
@@ -294,12 +317,16 @@ No painel do seu registrador de domínio (Cloudflare, Registro.br, GoDaddy, Host
 ---
 
 #### Passo 2: Atualizar as Variáveis no `.env` do Servidor
+
 Conecte na VPS e edite o arquivo `.env` para usar a URL do seu domínio com HTTPS:
+
 ```bash
 cd ~/nexus-chat
 nano .env
 ```
+
 Altere as seguintes variáveis (substituindo pelo seu domínio real):
+
 ```env
 BASE_URL="https://chat.seudominio.com.br"
 NEXTAUTH_URL="https://chat.seudominio.com.br"
@@ -307,12 +334,15 @@ NEXT_PUBLIC_APP_URL="https://chat.seudominio.com.br"
 NEXT_PUBLIC_API_URL="https://chat.seudominio.com.br/api"
 AUTH_TRUST_HOST="true"
 ```
-*(Pressione `Ctrl + O` e Enter para salvar, depois `Ctrl + X` para sair).*
+
+_(Pressione `Ctrl + O` e Enter para salvar, depois `Ctrl + X` para sair)._
 
 ---
 
 #### Passo 3: Instalar Nginx e Certbot (SSL Gratuito) na VPS
+
 Execute no terminal da VPS:
+
 ```bash
 sudo apt update
 sudo apt install -y nginx certbot python3-certbot-nginx
@@ -321,11 +351,15 @@ sudo apt install -y nginx certbot python3-certbot-nginx
 ---
 
 #### Passo 4: Configurar o Proxy Reverso no Nginx
+
 Crie a configuração do site no Nginx com suporte a WebSockets/Socket.IO e uploads de mídia:
+
 ```bash
 sudo nano /etc/nginx/sites-available/nexus-chat
 ```
+
 Cole o seguinte conteúdo (ajustando `chat.seudominio.com.br`):
+
 ```nginx
 server {
     listen 80;
@@ -346,7 +380,9 @@ server {
     }
 }
 ```
+
 Ative a configuração e recarregue o Nginx:
+
 ```bash
 sudo ln -sf /etc/nginx/sites-available/nexus-chat /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
@@ -357,19 +393,24 @@ sudo systemctl reload nginx
 ---
 
 #### Passo 5: Gerar Certificado SSL Gratuito (HTTPS)
+
 Execute o Certbot para obter e instalar o certificado Let's Encrypt automaticamente:
+
 ```bash
 sudo certbot --nginx -d chat.seudominio.com.br
 ```
-*(Informe seu e-mail quando solicitado e aceite os termos. O Certbot configurará a renovação automática).*
+
+_(Informe seu e-mail quando solicitado e aceite os termos. O Certbot configurará a renovação automática)._
 
 ---
 
 #### Passo 6: Reiniciar a Aplicação
+
 ```bash
 cd ~/nexus-chat
 pm2 restart nexus-chat
 ```
+
 Pronto! A plataforma estará acessível com cadeado de segurança em:
 👉 **`https://chat.seudominio.com.br`**
 
@@ -378,8 +419,8 @@ Pronto! A plataforma estará acessível com cadeado de segurança em:
 ## 🛡️ Diretrizes de Manutenção e Governança do Agente
 
 Para qualquer modificação ou expansão no código:
+
 - **Escopo Estrito e Pontual**: O agente **SÓ DEVE ALTERAR O QUE FOR EXPRESSAMENTE SOLICITADO NO PROMPT DO USUÁRIO**.
 - **Tratamento de Erros Encontrados no Caminho**: Se o agente encontrar qualquer erro, inconsistência ou falha que não tenha sido solicitada diretamente no prompt, **NÃO DEVE ALTERAR O CÓDIGO POR CONTA PRÓPRIA**. Deve **obrigatoriamente informar o usuário e perguntar se ele autoriza a correção**.
 - **Respeito às Regras Globais**: Respeitar rigorosamente os arquivos [AGENTS.md](file:///d:/NexusChat/AGENTS.md) e [GEMINI.md](file:///d:/NexusChat/GEMINI.md).
 - **Proibição de Refatorações Espontâneas**: Toda e qualquer sugestão ou melhoria arquitetural deve ser apresentada em relatório prévio aguardando aprovação explícita antes de qualquer edição.
-
