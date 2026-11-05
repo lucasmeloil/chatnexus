@@ -38,10 +38,13 @@ const FUNNY_ACCESSORIES = [
 ];
 
 const QUICK_MEMES = [
+    "QUANDO O CLIENTE DIZ QUE TÁ PAGO 💸",
+    "EU ESPERANDO O COMPROVANTE 👀",
     "CALMA CALABRESO 😂",
     "PAGOU O BOLETO? 💸",
-    "CHAMA NO ZAP 📲",
-    "TÁ PAGO! 🚀"
+    "TÁ PAGO, PODE LIBERAR! 🚀",
+    "SEGUNDOU COM S DE SOCORRO ☕",
+    "CHAMA NO ZAP 📲"
 ];
 
 export function AiStickerDialog({
@@ -56,6 +59,7 @@ export function AiStickerDialog({
     const [memeText, setMemeText] = useState("");
     const [style, setStyle] = useState("caricature");
     const [accessory, setAccessory] = useState("thug_glasses");
+    const [layout, setLayout] = useState("banner");
     const [attachedFile, setAttachedFile] = useState<File | null>(null);
     const [attachedPreview, setAttachedPreview] = useState<string | null>(null);
     const [generating, setGenerating] = useState(false);
@@ -90,6 +94,7 @@ export function AiStickerDialog({
             formData.append("memeText", memeText.trim());
             formData.append("style", style);
             formData.append("accessory", accessory);
+            formData.append("layout", layout);
             formData.append("pack", "Nexus Memes");
             formData.append("author", "Nexus Chat");
 
@@ -215,13 +220,37 @@ export function AiStickerDialog({
                         )}
                     </div>
 
-                    {/* Frase de Meme */}
+                    {/* Formato da Frase */}
                     <div className="space-y-1">
                         <Label className="text-xs font-semibold flex items-center gap-1">
-                            <Type className="h-3 w-3 text-primary" /> Frase do Meme (Legenda na foto)
+                            <Type className="h-3 w-3 text-primary" /> Frase do Meme (Legenda na figurinha)
                         </Label>
+                        <div className="flex gap-2 pb-1">
+                            <button
+                                type="button"
+                                onClick={() => setLayout("banner")}
+                                className={`flex-1 py-1 px-2 rounded border text-center text-[10px] font-semibold transition-colors cursor-pointer ${
+                                    layout === "banner"
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "border-border/60 hover:bg-muted/40 text-muted-foreground"
+                                }`}
+                            >
+                                🏷️ Faixa no Topo (Estilo Zap)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setLayout("classic")}
+                                className={`flex-1 py-1 px-2 rounded border text-center text-[10px] font-semibold transition-colors cursor-pointer ${
+                                    layout === "classic"
+                                        ? "border-primary bg-primary/10 text-primary"
+                                        : "border-border/60 hover:bg-muted/40 text-muted-foreground"
+                                }`}
+                            >
+                                💥 Texto Impact Clássico
+                            </button>
+                        </div>
                         <Input
-                            placeholder="Ex: CALMA CALABRESO ou PAGOU O BOLETO?"
+                            placeholder="Ex: QUANDO O CLIENTE DIZ QUE TÁ PAGO..."
                             value={memeText}
                             onChange={e => setMemeText(e.target.value)}
                             className="h-8 text-xs uppercase font-bold"

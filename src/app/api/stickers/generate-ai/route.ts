@@ -30,16 +30,18 @@ function escapeXml(unsafe: string): string {
 
 /**
  * Cria sobreposição SVG com acessórios cômicos (Óculos Thug Life, Bigode, Nariz de Palhaço, Lágrimas, Olhos Laser)
- * e tipografia clássica de Meme (Impact em branco com contorno preto).
+ * e tipografia de Meme (Impact ou Faixa no Topo estilo Zap).
  */
 function createFunnyMemeSvgOverlay({
     text = "",
     accessory = "thug_glasses",
+    layout = "classic", // 'classic' | 'banner'
     width = 512,
     height = 512
 }: {
     text?: string;
     accessory?: string;
+    layout?: string;
     width?: number;
     height?: number;
 }): Buffer {
@@ -131,7 +133,7 @@ function createFunnyMemeSvgOverlay({
             break;
     }
 
-    // 2. Tipografia Clássica de Meme (Impact branca com contorno preto reforçado)
+    // 2. Tipografia do Meme: Banner Superior estilo Zap OU Impact Clássico
     let textSvg = "";
     if (text.trim()) {
         const cleanText = text.trim().toUpperCase();
@@ -147,13 +149,24 @@ function createFunnyMemeSvgOverlay({
             line2 = words.slice(mid).join(" ");
         }
 
-        const fontSize = line2 ? 38 : 44;
-        const yLine1 = line2 ? height - 68 : height - 42;
-        const yLine2 = height - 20;
+        if (layout === "banner") {
+            // Faixa branca superior estilo meme moderno do Twitter / WhatsApp
+            const bannerH = line2 ? 85 : 55;
+            textSvg = `
+              <rect x="0" y="0" width="${width}" height="${bannerH}" fill="#ffffff" rx="8" />
+              <line x1="0" y1="${bannerH}" x2="${width}" y2="${bannerH}" stroke="#000000" stroke-width="3"/>
+              <text x="${width / 2}" y="${line2 ? 32 : 36}" font-family="Arial, 'Segoe UI', Impact, sans-serif" font-weight="900" font-size="${line2 ? 24 : 28}px" fill="#000000" text-anchor="middle">${escapeXml(line1)}</text>
+              ${line2 ? `<text x="${width / 2}" y="65" font-family="Arial, 'Segoe UI', Impact, sans-serif" font-weight="900" font-size="24px" fill="#000000" text-anchor="middle">${escapeXml(line2)}</text>` : ""}`;
+        } else {
+            // Clássico Impact Branco com Borda Preta Grossa
+            const fontSize = line2 ? 38 : 44;
+            const yLine1 = line2 ? height - 68 : height - 42;
+            const yLine2 = height - 20;
 
-        textSvg = `
-          <text x="${width / 2}" y="${yLine1}" font-size="${fontSize}px" class="meme-text">${escapeXml(line1)}</text>
-          ${line2 ? `<text x="${width / 2}" y="${yLine2}" font-size="${fontSize}px" class="meme-text">${escapeXml(line2)}</text>` : ""}`;
+            textSvg = `
+              <text x="${width / 2}" y="${yLine1}" font-size="${fontSize}px" class="meme-text">${escapeXml(line1)}</text>
+              ${line2 ? `<text x="${width / 2}" y="${yLine2}" font-size="${fontSize}px" class="meme-text">${escapeXml(line2)}</text>` : ""}`;
+        }
     }
 
     const svg = `
@@ -196,6 +209,7 @@ export async function POST(request: NextRequest) {
         const memeText = (formData.get("memeText") as string || "").trim();
         const style = (formData.get("style") as string || "caricature");
         const accessory = (formData.get("accessory") as string || "thug_glasses");
+        const layout = (formData.get("layout") as string || "classic");
         const pack = (formData.get("pack") as string || "NEXUS AI");
         const author = (formData.get("author") as string || user.name || "Nexus Chat");
         const sessionId = (formData.get("sessionId") as string || "").trim();
@@ -222,6 +236,7 @@ export async function POST(request: NextRequest) {
             const svgOverlay = createFunnyMemeSvgOverlay({
                 text: memeText,
                 accessory: accessory,
+                layout: layout,
                 width: 512,
                 height: 512
             });
@@ -240,11 +255,53 @@ export async function POST(request: NextRequest) {
             }
 
             const promptToUse = userPrompt || memeText;
+            let finalImagePrompt = promptToUse;
+
+            // Otimizador Cômico via Groq Llama 3.3: Converte qualquer ideia em prompt visual ultra preciso e engraçado
+            const groqKey = process.env.GROQ_API_KEY?.trim();
+            if (groqKey) {
+                try {
+                    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                        method: "POST",
+                        headers: {
+                            Authorization: `Bearer ${groqKey}`,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            model: "llama-3.3-70b-versatile",
+                            messages: [
+                                {
+                                    role: "system",
+                                    content: "You are a master Brazilian WhatsApp meme & funny sticker creator. Translate and transform the user's idea into an extremely funny, precise visual English prompt for an AI image generator (Flux). The prompt MUST describe a hilarious, ridiculous, exaggerated 3D cartoon caricature with comical laughing or shocked facial expressions, funny reaction, pop art meme style, bold white die-cut sticker outline, solid pure white background, vibrant colors. Output ONLY the one-line English prompt, no quotes, no markdown."
+                                },
+                                {
+                                    role: "user",
+                                    content: promptToUse
+                                }
+                            ],
+                            max_tokens: 120,
+                            temperature: 0.85
+                        }),
+                        signal: AbortSignal.timeout(6000)
+                    });
+
+                    if (groqRes.ok) {
+                        const groqData = await groqRes.json();
+                        const candidate = groqData.choices?.[0]?.message?.content?.trim();
+                        if (candidate && candidate.length > 10) {
+                            finalImagePrompt = candidate.replace(/^["']|["']$/g, "");
+                        }
+                    }
+                } catch (gErr) {
+                    console.warn("Groq prompt optimizer fallback:", gErr);
+                }
+            }
+
             const styleText = STYLE_PROMPTS[style] || STYLE_PROMPTS.caricature;
-            const finalPrompt = `hilarious funny comic sticker of ${promptToUse}, ${styleText}, white background, vibrant colors, expressive funny face, ridiculous goofy laughing expression, cartoon caricature, sharp details, sticker style, white border contour, high resolution, no watermark`;
+            const fullPrompt = `${finalImagePrompt}, ${styleText}, die-cut sticker, pure white background, sticker contour border, 3D cartoon, 4k render`;
 
             const seed = Math.floor(Math.random() * 1000000);
-            const encodedPrompt = encodeURIComponent(finalPrompt);
+            const encodedPrompt = encodeURIComponent(fullPrompt);
             const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=512&height=512&seed=${seed}&nologo=true&model=flux`;
 
             const controller = new AbortController();
@@ -266,14 +323,15 @@ export async function POST(request: NextRequest) {
             if (memeText || (accessory && accessory !== "none")) {
                 const svgOverlay = createFunnyMemeSvgOverlay({
                     text: memeText,
-                    accessory: accessory === "thug_glasses" ? "none" : accessory, // IA já pode ter estilizado óculos se for o caso
+                    accessory: accessory === "thug_glasses" ? "none" : accessory,
+                    layout: layout,
                     width: 512,
                     height: 512
                 });
 
                 baseImageBuffer = await sharp(rawAiBuffer)
                     .resize(512, 512, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-                    .modulate({ saturation: 1.25, brightness: 1.02 })
+                    .modulate({ saturation: 1.3, brightness: 1.03 })
                     .sharpen()
                     .composite([{ input: svgOverlay, top: 0, left: 0 }])
                     .png()

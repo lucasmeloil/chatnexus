@@ -37,6 +37,13 @@
     "category": "Atendimento"
   },
   {
+    "id": "qr-finalizado-nexus",
+    "shortcut": "/atendimento finalizado",
+    "title": "Atendimento Finalizado",
+    "content": "Atendimento finalizado com sucesso! A NEXUS SOFT TECH RESOLUÇÕA DO CHAMDO: '  ' . Se precisar de suporte, estaremos sempre à disposição.",
+    "category": "Atendimento"
+  },
+  {
     "id": "qr-6",
     "shortcut": "/comercial",
     "title": "Transferência Comercial",

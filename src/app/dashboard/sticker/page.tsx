@@ -69,6 +69,7 @@ export default function StickerPage() {
     const [aiAttachedPreview, setAiAttachedPreview] = useState<string | null>(null);
     const [aiStyle, setAiStyle] = useState("caricature");
     const [aiAccessory, setAiAccessory] = useState("thug_glasses");
+    const [aiLayout, setAiLayout] = useState("banner");
     const [aiTarget, setAiTarget] = useState("");
     const [aiPack, setAiPack] = useState("Nexus Memes");
     const [aiAuthor, setAiAuthor] = useState("Nexus AI");
@@ -129,6 +130,7 @@ export default function StickerPage() {
             formData.append("memeText", aiMemeText.trim());
             formData.append("style", aiStyle);
             formData.append("accessory", aiAccessory);
+            formData.append("layout", aiLayout);
             formData.append("pack", aiPack.trim() || "Nexus Memes");
             formData.append("author", aiAuthor.trim() || "Nexus AI");
 

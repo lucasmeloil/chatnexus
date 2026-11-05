@@ -446,6 +446,8 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
     const [isFinishDialogOpen, setIsFinishDialogOpen] = useState<boolean>(false);
     const [sendClosingMessage, setSendClosingMessage] = useState<boolean>(true);
     const [closingMessageText, setClosingMessageText] = useState<string>("Atendimento finalizado com sucesso! A NEXUS SOFT TECH RESOLUÇÕA DO CHAMDO: '  ' . Se precisar de suporte, estaremos sempre à disposição.");
+    const [callResolution, setCallResolution] = useState<string>("");
+    const [selectedQuickReplyId, setSelectedQuickReplyId] = useState<string>("");
     const [isFinishing, setIsFinishing] = useState<boolean>(false);
     const [isChatFinalized, setIsChatFinalized] = useState<boolean>(initialAttendance?.status === "CLOSED");
     const [finalizedLabelId, setFinalizedLabelId] = useState<string | null>(null);
@@ -461,6 +463,39 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
     const [notifyCustomer, setNotifyCustomer] = useState<boolean>(true);
     const [transferCustomerNote, setTransferCustomerNote] = useState<string>("Seu atendimento foi direcionado ao setor Comercial. Um momento, por favor!");
     const [isTransferring, setIsTransferring] = useState<boolean>(false);
+
+    // Sincronizar com mensagens pré-programadas ao abrir modal de finalização
+    useEffect(() => {
+        if (isFinishDialogOpen && quickReplies.length > 0) {
+            const found = quickReplies.find(q => 
+                q.shortcut === "/atendimento finalizado" || 
+                q.shortcut === "/finalizado" || 
+                q.title?.toLowerCase().includes("finaliz")
+            );
+            if (found) {
+                setSelectedQuickReplyId(found.id);
+                if (!callResolution) {
+                    setClosingMessageText(found.content);
+                }
+            }
+        }
+    }, [isFinishDialogOpen, quickReplies]);
+
+    const handleResolutionChange = (resolution: string) => {
+        setCallResolution(resolution);
+        const template = quickReplies.find(q => q.id === selectedQuickReplyId)?.content ||
+            "Atendimento finalizado com sucesso! A NEXUS SOFT TECH RESOLUÇÕA DO CHAMDO: '  ' . Se precisar de suporte, estaremos sempre à disposição.";
+        
+        if (template.includes("RESOLUÇÕA DO CHAMDO: '")) {
+            const updated = template.replace(/RESOLUÇÕA DO CHAMDO:\s*'[^']*'/i, `RESOLUÇÕA DO CHAMDO: '${resolution || "  "}'`);
+            setClosingMessageText(updated);
+        } else if (template.includes("RESOLUÇÃO DO CHAMADO: '")) {
+            const updated = template.replace(/RESOLUÇÃO DO CHAMADO:\s*'[^']*'/i, `RESOLUÇÃO DO CHAMADO: '${resolution || "  "}'`);
+            setClosingMessageText(updated);
+        } else {
+            setClosingMessageText(`Atendimento finalizado com sucesso! A NEXUS SOFT TECH RESOLUÇÕA DO CHAMDO: '${resolution || "  "}' . Se precisar de suporte, estaremos sempre à disposição.`);
+        }
+    };
 
     // Check attendance and labels for this chat
     const checkChatStatus = useCallback(async () => {
@@ -1824,14 +1859,60 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                         </label>
 
                         {sendClosingMessage && (
-                            <div className="space-y-1">
-                                <label className="text-[11px] text-muted-foreground font-medium">Mensagem de Encerramento:</label>
-                                <textarea
-                                    value={closingMessageText}
-                                    onChange={(e) => setClosingMessageText(e.target.value)}
-                                    rows={3}
-                                    className="w-full rounded-lg border border-border/50 bg-background p-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed"
-                                />
+                            <div className="space-y-2.5 pt-1">
+                                {/* Selecionar de Mensagens Pré-Programadas */}
+                                {quickReplies.length > 0 && (
+                                    <div className="space-y-1">
+                                        <div className="flex items-center justify-between">
+                                            <label className="text-[11px] text-muted-foreground font-semibold">Mensagem Pré-programada:</label>
+                                            <span className="text-[10px] text-primary font-medium">/atendimento finalizado</span>
+                                        </div>
+                                        <select
+                                            value={selectedQuickReplyId}
+                                            onChange={(e) => {
+                                                const qr = quickReplies.find(q => q.id === e.target.value);
+                                                setSelectedQuickReplyId(e.target.value);
+                                                if (qr) {
+                                                    setClosingMessageText(qr.content);
+                                                    setCallResolution("");
+                                                }
+                                            }}
+                                            className="w-full rounded-lg border border-border/70 bg-background px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                                        >
+                                            {quickReplies.map(qr => (
+                                                <option key={qr.id} value={qr.id}>
+                                                    {qr.shortcut} - {qr.title}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+
+                                {/* Resolução do Chamado */}
+                                <div className="space-y-1">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-[11px] font-semibold text-foreground">Resolução do Chamado:</label>
+                                        <span className="text-[10px] text-muted-foreground">Preenche entre as aspas</span>
+                                    </div>
+                                    <input
+                                        type="text"
+                                        placeholder="Ex: Boleto gerado e enviado, cliente ciente."
+                                        value={callResolution}
+                                        onChange={(e) => handleResolutionChange(e.target.value)}
+                                        className="w-full h-8 rounded-lg border border-border/70 bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                                    />
+                                </div>
+
+                                {/* Mensagem Completa Editável */}
+                                <div className="space-y-1">
+                                    <label className="text-[11px] text-muted-foreground font-medium">Mensagem Completa (Editável):</label>
+                                    <textarea
+                                        value={closingMessageText}
+                                        onChange={(e) => setClosingMessageText(e.target.value)}
+                                        rows={3}
+                                        className="w-full rounded-lg border border-border/50 bg-background p-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed"
+                                    />
+                                </div>
                             </div>
                         )}
                     </div>
