@@ -34,6 +34,7 @@ import { isSameChatJid } from "@/lib/jid-utils";
 import { EmojiPicker } from "./emoji-picker";
 import { VoiceStudioDialog } from "./voice-studio-dialog";
 import { VoiceProfile, VOICE_PROFILES } from "@/lib/voice-profiles";
+import { AiStickerDialog } from "./ai-sticker-dialog";
 
 interface Message {
     id: string;
@@ -450,6 +451,7 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
 
     // Transferir Atendimento state
     const [isTransferDialogOpen, setIsTransferDialogOpen] = useState<boolean>(false);
+    const [showAiStickerDialog, setShowAiStickerDialog] = useState<boolean>(false);
     const [availableAttendants, setAvailableAttendants] = useState<any[]>([]);
     const [selectedAttendant, setSelectedAttendant] = useState<string>("QUEUE");
     const [selectedDepartmentTag, setSelectedDepartmentTag] = useState<"Comercial" | "Financeiro" | "Pessoal" | "Suporte">("Comercial");
@@ -2594,9 +2596,24 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                             <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs cursor-pointer" onClick={() => triggerUpload('document')}>
                                                 <FileText className="h-3.5 w-3.5 text-emerald-500" /> Documento
                                             </Button>
+                                            <div className="h-px bg-border/40 my-0.5" />
+                                            <Button variant="ghost" size="sm" className="justify-start gap-2 h-8 text-xs text-pink-600 hover:text-pink-700 hover:bg-pink-500/10 cursor-pointer" onClick={() => setShowAiStickerDialog(true)}>
+                                                <Sparkles className="h-3.5 w-3.5 text-pink-500" /> Figurinha com IA
+                                            </Button>
                                         </div>
                                     </PopoverContent>
                                 </Popover>
+
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => setShowAiStickerDialog(true)}
+                                    className="h-9 w-9 rounded-full shrink-0 text-muted-foreground hover:text-pink-500 hover:bg-pink-500/10 cursor-pointer transition-colors"
+                                    title="Criar & Enviar Figurinha com IA"
+                                >
+                                    <Sparkles className="h-4.5 w-4.5 text-pink-500" />
+                                </Button>
 
                                 <Button
                                     type="button"
@@ -2806,6 +2823,15 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                     if (newPhotoUrl) setHeaderProfilePic(newPhotoUrl);
                     setStartContactEdit(false);
                 }}
+            />
+
+            {/* Diálogo de Criação e Envio de Figurinha com IA */}
+            <AiStickerDialog
+                open={showAiStickerDialog}
+                onOpenChange={setShowAiStickerDialog}
+                sessionId={sessionId}
+                jid={jid}
+                clientName={displayName}
             />
         </div>
     );
