@@ -206,6 +206,7 @@ export default function BroadcastPage() {
     const [contactLoading, setContactLoading] = useState(false);
     const [contactSearch, setContactSearch] = useState("");
     const [selectedContactJids, setSelectedContactJids] = useState<Set<string>>(new Set());
+    const [targetIndividualRowId, setTargetIndividualRowId] = useState<string | null>(null);
 
     // Standard Mode State
     const [contacts, setContacts] = useState("");
@@ -773,6 +774,23 @@ export default function BroadcastPage() {
     };
 
     const handleOpenContactModal = () => {
+        setTargetIndividualRowId(null);
+        setSelectedContactJids(new Set());
+        setContactSearch("");
+        setContactModalOpen(true);
+        loadSystemContacts();
+    };
+
+    const handleOpenContactPickerForRow = (rowId: string) => {
+        setTargetIndividualRowId(rowId);
+        setSelectedContactJids(new Set());
+        setContactSearch("");
+        setContactModalOpen(true);
+        loadSystemContacts();
+    };
+
+    const handleOpenContactModalForIndividual = () => {
+        setTargetIndividualRowId(null);
         setSelectedContactJids(new Set());
         setContactSearch("");
         setContactModalOpen(true);
@@ -783,6 +801,17 @@ export default function BroadcastPage() {
         const cleanPhone = contact.jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
         const contactName = contact.name || contact.notify || contact.verifiedName || "";
         
+        if (targetIndividualRowId) {
+            updateIndividualRow(targetIndividualRowId, {
+                phone: cleanPhone,
+                name: contactName
+            });
+            setContactModalOpen(false);
+            setTargetIndividualRowId(null);
+            toast.success(`Contato ${contactName || cleanPhone} adicionado com precisão!`);
+            return;
+        }
+
         if (broadcastMode === "leads") {
             setLeadRows(prev => {
                 const updated = [...prev];
@@ -795,6 +824,23 @@ export default function BroadcastPage() {
             });
             setContactModalOpen(false);
             toast.success(`Lead ${contactName || cleanPhone} selecionado com sucesso!`);
+            return;
+        }
+
+        if (broadcastMode === "individual") {
+            setIndividualRows(prev => {
+                const updated = [...prev];
+                if (updated.length > 0) {
+                    updated[0] = {
+                        ...updated[0],
+                        phone: cleanPhone,
+                        name: contactName
+                    };
+                }
+                return updated;
+            });
+            setContactModalOpen(false);
+            toast.success(`Contato ${contactName || cleanPhone} selecionado com sucesso!`);
             return;
         }
 
@@ -832,6 +878,44 @@ export default function BroadcastPage() {
     const handleAddSelectedContactsToRows = () => {
         if (selectedContactJids.size === 0) {
             toast.warning("Nenhum contato selecionado.");
+            return;
+        }
+
+        if (broadcastMode === "individual") {
+            const existingPhones = new Set(individualRows.map(r => r.phone.replace(/\D/g, "")).filter(Boolean));
+            const newRows: IndividualClientRow[] = [];
+
+            systemContacts.forEach((contact, idx) => {
+                if (selectedContactJids.has(contact.jid)) {
+                    const cleanPhone = contact.jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+                    const cleanDigits = cleanPhone.replace(/\D/g, "");
+                    if (cleanDigits && !existingPhones.has(cleanDigits)) {
+                        existingPhones.add(cleanDigits);
+                        newRows.push({
+                            id: String(Date.now() + idx + Math.random()),
+                            phone: cleanPhone,
+                            name: contact.name || contact.notify || contact.verifiedName || "",
+                            amount: "",
+                            dueDate: "",
+                            pixCode: "",
+                            customMessage: "",
+                            file: null
+                        });
+                    }
+                }
+            });
+
+            if (newRows.length === 0) {
+                toast.info("Os contatos selecionados já constam na tabela de clientes e boletos.");
+            } else {
+                setIndividualRows(prev => {
+                    const hasEmptyFirst = prev.length === 1 && !prev[0].phone && !prev[0].name && !prev[0].file;
+                    return hasEmptyFirst ? newRows : [...prev, ...newRows];
+                });
+                toast.success(`${newRows.length} cliente(s) adicionado(s) à tabela com sucesso!`);
+            }
+
+            setContactModalOpen(false);
             return;
         }
 
@@ -1490,6 +1574,17 @@ export default function BroadcastPage() {
 
                                             <Button
                                                 type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={handleOpenContactModalForIndividual}
+                                                className="h-8 text-xs gap-1.5 cursor-pointer font-semibold text-primary border-primary/30 hover:bg-primary/10"
+                                                disabled={loading}
+                                            >
+                                                <UserCheck className="h-3.5 w-3.5" /> Selecionar Contatos Salvos
+                                            </Button>
+
+                                            <Button
+                                                type="button"
                                                 size="sm"
                                                 onClick={addIndividualRow}
                                                 className="h-8 text-xs gap-1.5 cursor-pointer font-semibold"
@@ -1505,7 +1600,7 @@ export default function BroadcastPage() {
                                                 <thead>
                                                     <tr className="border-b bg-muted/40 text-left text-muted-foreground">
                                                         <th className="py-2.5 px-3 font-semibold w-10 text-center">#</th>
-                                                        <th className="py-2.5 px-3 font-semibold w-40">WhatsApp</th>
+                                                        <th className="py-2.5 px-3 font-semibold w-44 min-w-[170px]">WhatsApp</th>
                                                         <th className="py-2.5 px-3 font-semibold w-36">Nome Cliente</th>
                                                         <th className="py-2.5 px-3 font-semibold w-28">Valor (R$)</th>
                                                         <th className="py-2.5 px-3 font-semibold w-28">Vencimento</th>
@@ -1521,13 +1616,26 @@ export default function BroadcastPage() {
                                                                 {index + 1}
                                                             </td>
                                                             <td className="py-2.5 px-3">
-                                                                <Input
-                                                                    placeholder="(11) 98765-4321"
-                                                                    value={row.phone}
-                                                                    onChange={e => updateIndividualRow(row.id, { phone: e.target.value })}
-                                                                    className="h-8 text-xs font-mono"
-                                                                    disabled={loading}
-                                                                />
+                                                                <div className="relative flex items-center">
+                                                                    <Input
+                                                                        placeholder="(11) 98765-4321"
+                                                                        value={row.phone}
+                                                                        onChange={e => updateIndividualRow(row.id, { phone: e.target.value })}
+                                                                        className="h-8 text-xs font-mono pr-8"
+                                                                        disabled={loading}
+                                                                    />
+                                                                    <Button
+                                                                        type="button"
+                                                                        variant="ghost"
+                                                                        size="sm"
+                                                                        onClick={() => handleOpenContactPickerForRow(row.id)}
+                                                                        className="absolute right-0.5 top-1/2 -translate-y-1/2 h-7 w-7 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded cursor-pointer"
+                                                                        title="Pesquisar nos contatos salvos e preencher com precisão"
+                                                                        disabled={loading}
+                                                                    >
+                                                                        <Search className="h-3.5 w-3.5" />
+                                                                    </Button>
+                                                                </div>
                                                             </td>
                                                             <td className="py-2.5 px-3">
                                                                 <Input
@@ -2952,14 +3060,21 @@ export default function BroadcastPage() {
                         )}
 
                         {/* Modal para Selecionar Contatos Salvos no Sistema */}
-                        <Dialog open={contactModalOpen} onOpenChange={setContactModalOpen}>
+                        <Dialog open={contactModalOpen} onOpenChange={(open) => {
+                            setContactModalOpen(open);
+                            if (!open) {
+                                setTargetIndividualRowId(null);
+                            }
+                        }}>
                             <DialogContent className="max-w-md sm:max-w-lg p-0 overflow-hidden">
                                 <DialogHeader className="p-4 border-b bg-muted/20">
                                     <DialogTitle className="text-sm sm:text-base font-bold flex items-center gap-2">
-                                        <Users className="h-4 w-4 text-primary" /> Contatos Salvos no Sistema
+                                        <Users className="h-4 w-4 text-primary" /> {targetIndividualRowId ? "Pesquisar Contato Salvo" : "Contatos Salvos no Sistema"}
                                     </DialogTitle>
                                     <p className="text-xs text-muted-foreground mt-0.5">
-                                        Selecione os clientes cadastrados no NEXUS Chat para adicionar ao disparo.
+                                        {targetIndividualRowId
+                                            ? "Pesquise e selecione o contato desejado para preencher o WhatsApp e o Nome com precisão."
+                                            : "Selecione os clientes cadastrados no NEXUS Chat para adicionar ao disparo."}
                                     </p>
                                 </DialogHeader>
 
@@ -2972,42 +3087,55 @@ export default function BroadcastPage() {
                                             value={contactSearch}
                                             onChange={e => setContactSearch(e.target.value)}
                                             className="pl-9 h-8 text-xs bg-background"
+                                            autoFocus
                                         />
                                     </div>
 
                                     {/* Controles para Seleção Múltipla */}
-                                    {collectiveTargetMode === "multiple" && (
-                                        <div className="flex items-center justify-between text-xs pt-1">
-                                            <span className="font-semibold text-muted-foreground">
-                                                {selectedContactJids.size} contato(s) selecionado(s)
-                                            </span>
-                                            <div className="flex gap-2">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        const query = contactSearch.toLowerCase().trim();
-                                                        const filtered = systemContacts.filter(c => {
-                                                            const name = (c.name || c.notify || c.verifiedName || "").toLowerCase();
-                                                            const jid = (c.jid || "").toLowerCase();
-                                                            return !query || name.includes(query) || jid.includes(query);
-                                                        });
-                                                        handleSelectAllFiltered(filtered);
-                                                    }}
-                                                    className="text-primary hover:underline text-xs font-semibold cursor-pointer"
-                                                >
-                                                    Marcar Todos
-                                                </button>
-                                                <span>•</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={handleClearContactSelection}
-                                                    className="text-muted-foreground hover:underline text-xs cursor-pointer"
-                                                >
-                                                    Desmarcar
-                                                </button>
+                                    {(() => {
+                                        const isModalMultiple = targetIndividualRowId 
+                                            ? false 
+                                            : broadcastMode === "individual" 
+                                                ? true 
+                                                : broadcastMode === "leads" 
+                                                    ? leadsTargetMode === "multiple" 
+                                                    : collectiveTargetMode === "multiple";
+                                        
+                                        if (!isModalMultiple) return null;
+
+                                        return (
+                                            <div className="flex items-center justify-between text-xs pt-1">
+                                                <span className="font-semibold text-muted-foreground">
+                                                    {selectedContactJids.size} contato(s) selecionado(s)
+                                                </span>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const query = contactSearch.toLowerCase().trim();
+                                                            const filtered = systemContacts.filter(c => {
+                                                                const name = (c.name || c.notify || c.verifiedName || "").toLowerCase();
+                                                                const jid = (c.jid || "").toLowerCase();
+                                                                return !query || name.includes(query) || jid.includes(query);
+                                                            });
+                                                            handleSelectAllFiltered(filtered);
+                                                        }}
+                                                        className="text-primary hover:underline text-xs font-semibold cursor-pointer"
+                                                    >
+                                                        Marcar Todos
+                                                    </button>
+                                                    <span>•</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleClearContactSelection}
+                                                        className="text-muted-foreground hover:underline text-xs cursor-pointer"
+                                                    >
+                                                        Desmarcar
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    )}
+                                        );
+                                    })()}
 
                                     {/* Lista de Contatos com Scroll */}
                                     <div className="border rounded-xl divide-y overflow-y-auto max-h-[300px]">
@@ -3032,6 +3160,14 @@ export default function BroadcastPage() {
                                                 );
                                             }
 
+                                            const isModalMultiple = targetIndividualRowId 
+                                                ? false 
+                                                : broadcastMode === "individual" 
+                                                    ? true 
+                                                    : broadcastMode === "leads" 
+                                                        ? leadsTargetMode === "multiple" 
+                                                        : collectiveTargetMode === "multiple";
+
                                             return filtered.map((c) => {
                                                 const cleanPhone = c.jid.replace("@s.whatsapp.net", "").replace("@g.us", "");
                                                 const displayName = c.name || c.notify || c.verifiedName || cleanPhone;
@@ -3041,7 +3177,7 @@ export default function BroadcastPage() {
                                                     <div
                                                         key={c.jid}
                                                         onClick={() => {
-                                                            if (collectiveTargetMode === "single") {
+                                                            if (!isModalMultiple) {
                                                                 handleSelectSingleContact(c);
                                                             } else {
                                                                 handleToggleContactSelection(c.jid);
@@ -3052,7 +3188,7 @@ export default function BroadcastPage() {
                                                         }`}
                                                     >
                                                         <div className="flex items-center gap-2.5 min-w-0">
-                                                            {collectiveTargetMode === "multiple" && (
+                                                            {isModalMultiple && (
                                                                 <div className="shrink-0">
                                                                     {isSelected ? (
                                                                         <CheckSquare className="h-4 w-4 text-primary" />
@@ -3077,7 +3213,7 @@ export default function BroadcastPage() {
                                                             </div>
                                                         </div>
 
-                                                        {collectiveTargetMode === "single" && (
+                                                        {!isModalMultiple && (
                                                             <Button
                                                                 type="button"
                                                                 size="sm"
@@ -3094,28 +3230,43 @@ export default function BroadcastPage() {
                                     </div>
                                 </div>
 
-                                {collectiveTargetMode === "multiple" && (
-                                    <div className="p-3 border-t bg-muted/20 flex items-center justify-end gap-2">
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => setContactModalOpen(false)}
-                                            className="h-8 text-xs cursor-pointer"
-                                        >
-                                            Cancelar
-                                        </Button>
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            onClick={handleAddSelectedContactsToRows}
-                                            disabled={selectedContactJids.size === 0}
-                                            className="h-8 text-xs font-semibold cursor-pointer"
-                                        >
-                                            Adicionar {selectedContactJids.size} Contato{selectedContactJids.size !== 1 ? "s" : ""} à Tabela
-                                        </Button>
-                                    </div>
-                                )}
+                                {(() => {
+                                    const isModalMultiple = targetIndividualRowId 
+                                        ? false 
+                                        : broadcastMode === "individual" 
+                                            ? true 
+                                            : broadcastMode === "leads" 
+                                                ? leadsTargetMode === "multiple" 
+                                                : collectiveTargetMode === "multiple";
+
+                                    if (!isModalMultiple) return null;
+
+                                    return (
+                                        <div className="p-3 border-t bg-muted/20 flex items-center justify-end gap-2">
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    setContactModalOpen(false);
+                                                    setTargetIndividualRowId(null);
+                                                }}
+                                                className="h-8 text-xs cursor-pointer"
+                                            >
+                                                Cancelar
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                onClick={handleAddSelectedContactsToRows}
+                                                disabled={selectedContactJids.size === 0}
+                                                className="h-8 text-xs font-semibold cursor-pointer"
+                                            >
+                                                Adicionar {selectedContactJids.size} Contato{selectedContactJids.size !== 1 ? "s" : ""} à Tabela
+                                            </Button>
+                                        </div>
+                                    );
+                                })()}
                             </DialogContent>
                         </Dialog>
 
