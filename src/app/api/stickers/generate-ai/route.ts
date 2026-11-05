@@ -4,6 +4,7 @@ import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
 import { fireSentWebhook } from "@/lib/webhook";
 import { formatToBrazilPhoneJid } from "@/lib/jid-utils";
 import Sticker from "wa-sticker-formatter";
+import sharp from "sharp";
 
 const STYLE_PROMPTS: Record<string, string> = {
     caricature: "exaggerated funny caricature sticker, big head, expressive funny comic face, hilarious laughing expression, clean sticker contour, solid white background",
@@ -14,6 +15,58 @@ const STYLE_PROMPTS: Record<string, string> = {
     cute: "ultra cute kawaii chibi mascot sticker, big sparkling eyes, joyful blush, clean outline border"
 };
 
+function escapeXml(unsafe: string): string {
+    return unsafe.replace(/[<>&'"]/g, (c) => {
+        switch (c) {
+            case "<": return "&lt;";
+            case ">": return "&gt;";
+            case "&": return "&amp;";
+            case "'": return "&apos;";
+            case '"': return "&quot;";
+            default: return c;
+        }
+    });
+}
+
+function createMemeSvgOverlay(text: string, width: number = 512, height: number = 512): Buffer {
+    const cleanText = text.trim().toUpperCase();
+    const words = cleanText.split(/\s+/);
+    
+    // Quebrar em 2 linhas se for longo
+    let line1 = "";
+    let line2 = "";
+    if (words.length <= 4) {
+        line1 = words.join(" ");
+    } else {
+        const mid = Math.ceil(words.length / 2);
+        line1 = words.slice(0, mid).join(" ");
+        line2 = words.slice(mid).join(" ");
+    }
+
+    const fontSize = line2 ? 38 : 44;
+    const yLine1 = line2 ? height - 65 : height - 45;
+    const yLine2 = height - 20;
+
+    const svg = `
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      <style>
+        .meme-text {
+          font-family: Impact, "Arial Black", "Segoe UI Black", sans-serif;
+          font-weight: 900;
+          fill: #ffffff;
+          stroke: #000000;
+          stroke-width: 6px;
+          paint-order: stroke fill;
+          text-anchor: middle;
+        }
+      </style>
+      <text x="${width / 2}" y="${yLine1}" font-size="${fontSize}px" class="meme-text">${escapeXml(line1)}</text>
+      ${line2 ? `<text x="${width / 2}" y="${yLine2}" font-size="${fontSize}px" class="meme-text">${escapeXml(line2)}</text>` : ""}
+    </svg>`;
+
+    return Buffer.from(svg);
+}
+
 export async function POST(request: NextRequest) {
     try {
         const user = await getAuthenticatedUser(request);
@@ -23,45 +76,82 @@ export async function POST(request: NextRequest) {
 
         const formData = await request.formData();
         const userPrompt = (formData.get("prompt") as string || "").trim();
+        const memeText = (formData.get("memeText") as string || "").trim();
         const style = (formData.get("style") as string || "caricature");
         const pack = (formData.get("pack") as string || "NEXUS AI");
         const author = (formData.get("author") as string || user.name || "Nexus Chat");
         const sessionId = (formData.get("sessionId") as string || "").trim();
         const targetNumber = (formData.get("target") as string || "").trim();
+        const attachedFile = formData.get("file") as File | null;
 
-        if (!userPrompt) {
-            return NextResponse.json({ status: false, message: "Informe a descrição da figurinha", error: "Prompt is required" }, { status: 400 });
-        }
+        let baseImageBuffer: Buffer | null = null;
 
-        // Montar prompt otimizado para sticker engraçado do WhatsApp
-        const styleText = STYLE_PROMPTS[style] || STYLE_PROMPTS.caricature;
-        const finalPrompt = `die-cut sticker of ${userPrompt}, ${styleText}, white background, vibrant colors, expressive funny face, vector illustration, sharp details, sticker style, white border contour, high resolution, no text, no watermark`;
+        // CASO 1: Usuário anexou uma imagem (foto do chefe, produto, cliente, meme)
+        if (attachedFile && attachedFile.size > 0) {
+            const rawBuffer = Buffer.from(await attachedFile.arrayBuffer());
+            
+            // Redimensionar para 512x512 no padrão sticker do WhatsApp
+            let sharpImg = sharp(rawBuffer).resize(512, 512, {
+                fit: "contain",
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
+            });
 
-        const seed = Math.floor(Math.random() * 1000000);
-        const encodedPrompt = encodeURIComponent(finalPrompt);
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=512&height=512&seed=${seed}&nologo=true&model=flux`;
-
-        // Buscar imagem gerada pela IA gratuita
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 40000);
-
-        const aiResponse = await fetch(pollinationsUrl, {
-            signal: controller.signal,
-            headers: {
-                "User-Agent": "NexusChat/1.0"
+            // Se o usuário digitou uma frase de meme, estampar sobre a foto com tipografia meme
+            if (memeText) {
+                const svgOverlay = createMemeSvgOverlay(memeText, 512, 512);
+                sharpImg = sharpImg.composite([{ input: svgOverlay, top: 0, left: 0 }]);
             }
-        });
-        clearTimeout(timeout);
 
-        if (!aiResponse.ok) {
-            throw new Error(`Falha no provedor de IA gratuito (status: ${aiResponse.status})`);
+            baseImageBuffer = await sharpImg.png().toBuffer();
+        } 
+        // CASO 2: Gerar imagem do zero via IA a partir do Prompt
+        else {
+            if (!userPrompt && !memeText) {
+                return NextResponse.json({ 
+                    status: false, 
+                    message: "Anexe uma foto ou descreva a figurinha desejada.", 
+                    error: "Prompt or file required" 
+                }, { status: 400 });
+            }
+
+            const promptToUse = userPrompt || memeText;
+            const styleText = STYLE_PROMPTS[style] || STYLE_PROMPTS.caricature;
+            const finalPrompt = `die-cut sticker of ${promptToUse}, ${styleText}, white background, vibrant colors, expressive funny face, vector illustration, sharp details, sticker style, white border contour, high resolution, no text, no watermark`;
+
+            const seed = Math.floor(Math.random() * 1000000);
+            const encodedPrompt = encodeURIComponent(finalPrompt);
+            const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=512&height=512&seed=${seed}&nologo=true&model=flux`;
+
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 40000);
+
+            const aiResponse = await fetch(pollinationsUrl, {
+                signal: controller.signal,
+                headers: { "User-Agent": "NexusChat/1.0" }
+            });
+            clearTimeout(timeout);
+
+            if (!aiResponse.ok) {
+                throw new Error(`Falha no provedor de IA gratuito (status: ${aiResponse.status})`);
+            }
+
+            const rawAiBuffer = Buffer.from(await aiResponse.arrayBuffer());
+
+            // Se além do prompt houver frase de meme especificada, estampar sobre a imagem da IA
+            if (memeText) {
+                const svgOverlay = createMemeSvgOverlay(memeText, 512, 512);
+                baseImageBuffer = await sharp(rawAiBuffer)
+                    .resize(512, 512, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+                    .composite([{ input: svgOverlay, top: 0, left: 0 }])
+                    .png()
+                    .toBuffer();
+            } else {
+                baseImageBuffer = rawAiBuffer;
+            }
         }
-
-        const imageArrayBuffer = await aiResponse.arrayBuffer();
-        const imageBuffer = Buffer.from(imageArrayBuffer);
 
         // Converter para Figurinha oficial do WhatsApp (.webp)
-        const sticker = new Sticker(imageBuffer, {
+        const sticker = new Sticker(baseImageBuffer, {
             pack,
             author,
             type: "full" as any,
@@ -91,17 +181,16 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             status: true,
-            message: sent ? "Figurinha gerada e enviada com sucesso!" : "Figurinha gerada com sucesso!",
+            message: sent ? "Figurinha gerada e enviada com sucesso no WhatsApp!" : "Figurinha gerada com sucesso!",
             webpBase64: `data:image/webp;base64,${webpBase64}`,
             sent
         });
 
     } catch (e: any) {
-        console.error("Erro ao gerar figurinha com IA:", e);
+        console.error("Erro ao gerar figurinha:", e);
         const msg = e.name === "AbortError" 
             ? "A IA demorou para responder. Tente novamente." 
-            : (e.message || "Falha ao gerar figurinha com IA");
+            : (e.message || "Falha ao gerar figurinha");
         return NextResponse.json({ status: false, message: msg, error: msg }, { status: 500 });
     }
 }
-

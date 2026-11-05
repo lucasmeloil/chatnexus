@@ -18,7 +18,10 @@ import {
     Smile, 
     Layers, 
     CheckCircle2,
-    Palette
+    Palette,
+    Paperclip,
+    X,
+    Type
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,11 +38,25 @@ const AI_STYLES = [
     { id: "cute", label: "🐱 Mascote Fofo", desc: "Adesivo fofo estilo kawaii com bochechas rosadas" }
 ];
 
+const MEME_PHRASES = [
+    "CALMA CALABRESO 😂",
+    "PAGOU O BOLETO? 💸",
+    "SÓ ACREDITO VENDO 👀",
+    "CHAMA NO ZAP 📲",
+    "SEGUNDOU COM S DE SOFRIMENTO ☕",
+    "TÔ SÓ DE OLHO 🧐",
+    "RIR PRA NÃO CHORAR 😭",
+    "TÁ PAGO! 🚀"
+];
+
 export default function StickerPage() {
     const { sessionId } = useSession();
 
-    // Estado da Aba IA
+    // Estado da Aba IA & Meme
     const [aiPrompt, setAiPrompt] = useState("");
+    const [aiMemeText, setAiMemeText] = useState("");
+    const [aiAttachedFile, setAiAttachedFile] = useState<File | null>(null);
+    const [aiAttachedPreview, setAiAttachedPreview] = useState<string | null>(null);
     const [aiStyle, setAiStyle] = useState("caricature");
     const [aiTarget, setAiTarget] = useState("");
     const [aiPack, setAiPack] = useState("Nexus Memes");
@@ -59,6 +76,20 @@ export default function StickerPage() {
     const [traditionalType, setTraditionalType] = useState("full");
     const [showAdvanced, setShowAdvanced] = useState(false);
 
+    // Manipulação de Arquivo na Aba IA
+    const handleAiFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const f = e.target.files?.[0];
+        if (f) {
+            setAiAttachedFile(f);
+            setAiAttachedPreview(URL.createObjectURL(f));
+        }
+    };
+
+    const handleRemoveAiFile = () => {
+        setAiAttachedFile(null);
+        setAiAttachedPreview(null);
+    };
+
     // Manipulação de Arquivo Tradicional
     const handleTraditionalFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const f = e.target.files?.[0];
@@ -68,10 +99,10 @@ export default function StickerPage() {
         }
     };
 
-    // Gerar Figurinha com IA Gratuita
+    // Gerar Figurinha com IA ou Imagem Anexada + Frase de Meme
     const handleGenerateAiSticker = async (sendImmediately: boolean = false) => {
-        if (!aiPrompt.trim()) {
-            toast.warning("Descreva como deseja a figurinha (prompt).");
+        if (!aiPrompt.trim() && !aiAttachedFile && !aiMemeText.trim()) {
+            toast.warning("Anexe uma foto, digite uma frase de meme ou descreva a figurinha.");
             return;
         }
 
@@ -84,9 +115,14 @@ export default function StickerPage() {
         try {
             const formData = new FormData();
             formData.append("prompt", aiPrompt.trim());
+            formData.append("memeText", aiMemeText.trim());
             formData.append("style", aiStyle);
             formData.append("pack", aiPack.trim() || "Nexus Memes");
             formData.append("author", aiAuthor.trim() || "Nexus AI");
+
+            if (aiAttachedFile) {
+                formData.append("file", aiAttachedFile);
+            }
 
             if (sendImmediately && sessionId && aiTarget.trim()) {
                 formData.append("sessionId", sessionId);
@@ -102,22 +138,22 @@ export default function StickerPage() {
             if (res.ok && data.status) {
                 setGeneratedStickerUrl(data.webpBase64);
                 if (data.sent) {
-                    toast.success("🎉 Figurinha com IA gerada e enviada com sucesso no WhatsApp!");
+                    toast.success("🎉 Figurinha gerada e enviada com sucesso no WhatsApp!");
                 } else {
-                    toast.success("✨ Figurinha gerada pela IA com sucesso!");
+                    toast.success("✨ Figurinha de meme gerada com sucesso!");
                 }
             } else {
-                toast.error(data.message || "Erro ao gerar figurinha com IA.");
+                toast.error(data.message || "Erro ao gerar figurinha.");
             }
         } catch (e: any) {
             console.error(e);
-            toast.error("Erro na comunicação com a IA.");
+            toast.error("Erro na comunicação ao gerar figurinha.");
         } finally {
             setAiGenerating(false);
         }
     };
 
-    // Enviar Figurinha IA já gerada para o WhatsApp
+    // Enviar Figurinha já gerada para o WhatsApp
     const handleSendGeneratedAiSticker = async () => {
         if (!sessionId || !aiTarget.trim() || !generatedStickerUrl) {
             toast.warning("Informe o número do destinatário e certifique-se de que a figurinha foi gerada.");
@@ -126,7 +162,6 @@ export default function StickerPage() {
 
         setAiSending(true);
         try {
-            // Converter data URL base64 para Blob
             const fetchRes = await fetch(generatedStickerUrl);
             const blob = await fetchRes.blob();
             const file = new File([blob], "nexus_ai_sticker.webp", { type: "image/webp" });
@@ -165,7 +200,7 @@ export default function StickerPage() {
         if (!generatedStickerUrl) return;
         const a = document.createElement("a");
         a.href = generatedStickerUrl;
-        a.download = `figurinha_ia_${Date.now()}.webp`;
+        a.download = `figurinha_meme_${Date.now()}.webp`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -221,116 +256,174 @@ export default function StickerPage() {
                     <div>
                         <div className="flex items-center gap-2">
                             <h2 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
-                                <Smile className="h-6 w-6 text-primary" /> Estúdio de Figurinhas (Stickers)
+                                <Smile className="h-6 w-6 text-primary" /> Estúdio de Figurinhas & Memes
                             </h2>
                             <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20 gap-1 font-semibold">
-                                <Sparkles className="h-3 w-3" /> IA Integrada Grátis
+                                <Sparkles className="h-3 w-3" /> Foto + Frase de Meme + IA
                             </Badge>
                         </div>
                         <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                            Crie figurinhas engraçadas e personalizadas com Inteligência Artificial ou converta suas próprias fotos.
+                            Anexe qualquer foto para transformar em figurinha com frase de meme ou crie caricaturas divertidas com IA.
                         </p>
                     </div>
                 </div>
 
                 {/* Abas */}
                 <Tabs defaultValue="ai" className="w-full">
-                    <TabsList className="grid w-full sm:w-[450px] grid-cols-2 p-1 bg-muted/60">
+                    <TabsList className="grid w-full sm:w-[480px] grid-cols-2 p-1 bg-muted/60">
                         <TabsTrigger value="ai" className="text-xs gap-2 font-semibold">
-                            <Wand2 className="h-3.5 w-3.5 text-primary" /> Criar com IA (Prompt)
+                            <Wand2 className="h-3.5 w-3.5 text-primary" /> Foto + Frase de Meme & IA
                         </TabsTrigger>
                         <TabsTrigger value="traditional" className="text-xs gap-2 font-semibold">
-                            <Layers className="h-3.5 w-3.5 text-muted-foreground" /> Envio Tradicional (Foto)
+                            <Layers className="h-3.5 w-3.5 text-muted-foreground" /> Envio Tradicional (Simples)
                         </TabsTrigger>
                     </TabsList>
 
-                    {/* ABA 1: CRIAR COM IA */}
+                    {/* ABA 1: FOTO + FRASE DE MEME & IA */}
                     <TabsContent value="ai" className="mt-4">
                         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                            {/* Formulário IA (7 colunas) */}
+                            {/* Formulário (7 colunas) */}
                             <div className="lg:col-span-7 space-y-4">
                                 <Card className="shadow-xs border-border/70">
                                     <CardHeader className="pb-3 border-b bg-muted/15">
                                         <CardTitle className="text-sm sm:text-base font-bold flex items-center gap-2">
-                                            <Sparkles className="h-4 w-4 text-primary" /> Descreva sua Figurinha Engraçada
+                                            <Sparkles className="h-4 w-4 text-primary" /> Criar Figurinha com Foto, Frase & Meme
                                         </CardTitle>
                                         <CardDescription className="text-xs">
-                                            A IA gratuita criará uma figurinha recortada em alta definição no padrão oficial do WhatsApp.
+                                            Anexe uma imagem do seu computador e digite uma frase engraçada, ou use a IA para gerar do zero!
                                         </CardDescription>
                                     </CardHeader>
                                     <CardContent className="p-4 sm:p-5 space-y-4">
-                                        {/* Prompt */}
+                                        {/* Anexo de Imagem (Opcional ou Principal) */}
                                         <div className="space-y-1.5">
                                             <Label className="text-xs font-semibold flex items-center justify-between">
-                                                <span>Descrição / Ideia da Figurinha</span>
-                                                <span className="text-[11px] text-muted-foreground font-normal">Ex: "Pessoa rindo com óculos escuros e joinha"</span>
+                                                <span>1. Imagem / Foto Anexada (Opcional)</span>
+                                                <span className="text-[11px] text-muted-foreground font-normal">Foto de alguém, print ou meme</span>
                                             </Label>
-                                            <Textarea
-                                                placeholder="Ex: Carlos do comercial rindo muito com óculos escuros estilo meme, cara engraçada e fogos de artifício..."
-                                                value={aiPrompt}
-                                                onChange={e => setAiPrompt(e.target.value)}
-                                                className="text-xs min-h-[90px] resize-none"
-                                            />
+
+                                            {aiAttachedPreview ? (
+                                                <div className="flex items-center justify-between p-2.5 rounded-xl border bg-card gap-3">
+                                                    <div className="flex items-center gap-3 min-w-0">
+                                                        <img src={aiAttachedPreview} alt="Anexo" className="w-12 h-12 rounded-lg object-cover border" />
+                                                        <div className="min-w-0">
+                                                            <p className="text-xs font-semibold truncate">{aiAttachedFile?.name || "Foto anexada"}</p>
+                                                            <p className="text-[10px] text-green-600 font-medium">Pronta para estampar o meme!</p>
+                                                        </div>
+                                                    </div>
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={handleRemoveAiFile}
+                                                        className="h-8 w-8 p-0 text-muted-foreground hover:text-red-500 cursor-pointer"
+                                                        title="Remover anexo"
+                                                    >
+                                                        <X className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer bg-muted/15 hover:bg-muted/30 transition-colors border-border/70 text-center px-4">
+                                                    <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                                                        <Paperclip className="h-4 w-4 text-primary" />
+                                                        <span>Clique para anexar uma foto ou arraste até aqui</span>
+                                                    </div>
+                                                    <span className="text-[10px] text-muted-foreground mt-1">Se não anexar nada, a IA criará a imagem do zero!</span>
+                                                    <input type="file" accept="image/*" className="hidden" onChange={handleAiFileChange} />
+                                                </label>
+                                            )}
                                         </div>
 
-                                        {/* Estilos em 1 Clique */}
-                                        <div className="space-y-2">
+                                        {/* Frase Engraçada do Meme */}
+                                        <div className="space-y-1.5">
                                             <Label className="text-xs font-semibold flex items-center gap-1.5">
-                                                <Palette className="h-3.5 w-3.5 text-primary" /> Escolha o Estilo Visual:
+                                                <Type className="h-3.5 w-3.5 text-primary" />
+                                                <span>2. Frase Engraçada / Legenda do Meme</span>
                                             </Label>
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                                                {AI_STYLES.map(st => {
-                                                    const isSelected = aiStyle === st.id;
-                                                    return (
-                                                        <button
-                                                            key={st.id}
-                                                            type="button"
-                                                            onClick={() => setAiStyle(st.id)}
-                                                            className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                                                                isSelected 
-                                                                    ? "border-primary bg-primary/10 text-primary ring-1 ring-primary/40 shadow-xs font-semibold" 
-                                                                    : "border-border/60 hover:bg-muted/40 text-foreground"
-                                                            }`}
-                                                        >
-                                                            <div className="text-xs">{st.label}</div>
-                                                            <div className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5">{st.desc}</div>
-                                                        </button>
-                                                    );
-                                                })}
+                                            <Input
+                                                placeholder="Ex: CALMA CALABRESO ou PAGOU O BOLETO?"
+                                                value={aiMemeText}
+                                                onChange={e => setAiMemeText(e.target.value)}
+                                                className="h-9 text-xs font-bold uppercase"
+                                            />
+                                            {/* Sugestões de Frases Rápidas */}
+                                            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                                                <span className="text-[10px] text-muted-foreground font-semibold">Sugestões rápidas:</span>
+                                                {MEME_PHRASES.map((ph, idx) => (
+                                                    <button
+                                                        key={idx}
+                                                        type="button"
+                                                        onClick={() => setAiMemeText(ph)}
+                                                        className="px-2 py-0.5 rounded-full border border-border/60 hover:border-primary/50 text-[10px] bg-muted/30 hover:bg-primary/5 text-muted-foreground hover:text-primary transition-all cursor-pointer font-medium"
+                                                    >
+                                                        {ph}
+                                                    </button>
+                                                ))}
                                             </div>
                                         </div>
 
+                                        {/* Descrição / Prompt Livre para a IA */}
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs font-semibold flex items-center justify-between">
+                                                <span>3. Ideia / Prompt para a IA (Se quiser gerar ou transformar)</span>
+                                                <span className="text-[11px] text-muted-foreground font-normal">Ex: "Caricatura rindo com fogos"</span>
+                                            </Label>
+                                            <Textarea
+                                                placeholder="Ex: Caricatura muito engraçada rindo, com óculos escuros estilo meme e chapéu de festa..."
+                                                value={aiPrompt}
+                                                onChange={e => setAiPrompt(e.target.value)}
+                                                className="text-xs min-h-[70px] resize-none"
+                                            />
+                                        </div>
+
+                                        {/* Estilos em 1 Clique (se for gerar imagem com IA) */}
+                                        {!aiAttachedFile && (
+                                            <div className="space-y-2">
+                                                <Label className="text-xs font-semibold flex items-center gap-1.5">
+                                                    <Palette className="h-3.5 w-3.5 text-primary" /> Estilo Visual da IA:
+                                                </Label>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                                    {AI_STYLES.map(st => {
+                                                        const isSelected = aiStyle === st.id;
+                                                        return (
+                                                            <button
+                                                                key={st.id}
+                                                                type="button"
+                                                                onClick={() => setAiStyle(st.id)}
+                                                                className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                                                                    isSelected 
+                                                                        ? "border-primary bg-primary/10 text-primary ring-1 ring-primary/40 shadow-xs font-semibold" 
+                                                                        : "border-border/60 hover:bg-muted/40 text-foreground"
+                                                                }`}
+                                                            >
+                                                                <div className="text-xs">{st.label}</div>
+                                                                <div className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5">{st.desc}</div>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* Número de Destino */}
                                         <div className="space-y-1.5 pt-1">
-                                            <Label className="text-xs font-semibold">WhatsApp de Destino (Opcional para envio imediato)</Label>
+                                            <Label className="text-xs font-semibold">WhatsApp de Destino (Opcional para envio direto)</Label>
                                             <Input
                                                 placeholder="Ex: (79) 99876-5432 ou 5579998765432"
                                                 value={aiTarget}
                                                 onChange={e => setAiTarget(e.target.value)}
                                                 className="h-9 text-xs font-mono"
                                             />
-                                            <p className="text-[10px] text-muted-foreground">
-                                                Você pode deixar em branco para apenas gerar e visualizar antes de enviar.
-                                            </p>
                                         </div>
 
-                                        {/* Metadados da Figurinha */}
+                                        {/* Metadados */}
                                         <div className="grid grid-cols-2 gap-3 pt-1 border-t">
                                             <div className="space-y-1">
-                                                <Label className="text-[11px] text-muted-foreground">Nome do Pacote</Label>
-                                                <Input
-                                                    value={aiPack}
-                                                    onChange={e => setAiPack(e.target.value)}
-                                                    className="h-8 text-xs"
-                                                />
+                                                <Label className="text-[11px] text-muted-foreground">Pacote</Label>
+                                                <Input value={aiPack} onChange={e => setAiPack(e.target.value)} className="h-8 text-xs" />
                                             </div>
                                             <div className="space-y-1">
-                                                <Label className="text-[11px] text-muted-foreground">Autor da Figurinha</Label>
-                                                <Input
-                                                    value={aiAuthor}
-                                                    onChange={e => setAiAuthor(e.target.value)}
-                                                    className="h-8 text-xs"
-                                                />
+                                                <Label className="text-[11px] text-muted-foreground">Autor</Label>
+                                                <Input value={aiAuthor} onChange={e => setAiAuthor(e.target.value)} className="h-8 text-xs" />
                                             </div>
                                         </div>
 
@@ -340,15 +433,15 @@ export default function StickerPage() {
                                                 type="button"
                                                 className="w-full sm:flex-1 h-10 text-xs font-bold gap-2 cursor-pointer bg-primary hover:bg-primary/90 shadow-xs"
                                                 onClick={() => handleGenerateAiSticker(false)}
-                                                disabled={aiGenerating || !aiPrompt.trim()}
+                                                disabled={aiGenerating || (!aiPrompt.trim() && !aiAttachedFile && !aiMemeText.trim())}
                                             >
                                                 {aiGenerating ? (
                                                     <>
-                                                        <RefreshCw className="h-4 w-4 animate-spin" /> Gerando Figurinha com IA...
+                                                        <RefreshCw className="h-4 w-4 animate-spin" /> Criando Figurinha...
                                                     </>
                                                 ) : (
                                                     <>
-                                                        <Sparkles className="h-4 w-4" /> Gerar Figurinha com IA Grátis
+                                                        <Sparkles className="h-4 w-4" /> Criar Figurinha com Meme & IA
                                                     </>
                                                 )}
                                             </Button>
@@ -359,10 +452,10 @@ export default function StickerPage() {
                                                     variant="secondary"
                                                     className="w-full sm:w-auto h-10 text-xs font-semibold gap-1.5 cursor-pointer"
                                                     onClick={() => handleGenerateAiSticker(true)}
-                                                    disabled={aiGenerating || !aiPrompt.trim() || !sessionId}
-                                                    title="Gera a figurinha com IA e já envia diretamente para o cliente"
+                                                    disabled={aiGenerating || !sessionId || (!aiPrompt.trim() && !aiAttachedFile && !aiMemeText.trim())}
+                                                    title="Gera a figurinha com a imagem/frase e já envia diretamente"
                                                 >
-                                                    <Send className="h-3.5 w-3.5" /> Gerar & Enviar Já
+                                                    <Send className="h-3.5 w-3.5" /> Criar & Enviar Já
                                                 </Button>
                                             )}
                                         </div>
@@ -370,20 +463,20 @@ export default function StickerPage() {
                                 </Card>
                             </div>
 
-                            {/* Preview da Figurinha IA (5 colunas) */}
+                            {/* Preview da Figurinha (5 colunas) */}
                             <div className="lg:col-span-5 space-y-4">
                                 <Card className="shadow-xs border-border/70 h-full flex flex-col">
                                     <CardHeader className="pb-3 border-b bg-muted/15">
                                         <CardTitle className="text-sm font-bold flex items-center justify-between">
-                                            <span>Pré-visualização do Sticker</span>
+                                            <span>Figurinha Final (.webp)</span>
                                             {generatedStickerUrl && (
                                                 <Badge variant="outline" className="text-[10px] text-green-600 bg-green-50 dark:bg-green-950/20 border-green-200">
-                                                    Pronta no padrão WhatsApp
+                                                    Padrão WhatsApp 512x512
                                                 </Badge>
                                             )}
                                         </CardTitle>
                                         <CardDescription className="text-xs">
-                                            Fundo transparente e recorte inteligente no padrão oficial do WhatsApp.
+                                            Formato oficial de figurinha com recorte e legenda em alta definição.
                                         </CardDescription>
                                     </CardHeader>
 
@@ -391,26 +484,24 @@ export default function StickerPage() {
                                         <div className="w-full aspect-square max-w-[280px] rounded-xl border border-dashed border-border/80 flex items-center justify-center bg-radial from-slate-50 to-slate-200 dark:from-slate-900/60 dark:to-slate-950/80 p-4 relative overflow-hidden shadow-inner">
                                             {aiGenerating ? (
                                                 <div className="text-center space-y-3 p-4">
-                                                    <div className="relative inline-block">
-                                                        <Sparkles className="h-10 w-10 text-primary animate-bounce mx-auto" />
-                                                    </div>
-                                                    <p className="text-xs font-semibold text-foreground">A IA está criando sua figurinha...</p>
-                                                    <p className="text-[11px] text-muted-foreground">Otimizando traços, cores e recorte transparente</p>
+                                                    <Sparkles className="h-10 w-10 text-primary animate-bounce mx-auto" />
+                                                    <p className="text-xs font-semibold text-foreground">Gerando sua figurinha com meme...</p>
+                                                    <p className="text-[11px] text-muted-foreground">Estilizando, aplicando legenda e formato WhatsApp</p>
                                                 </div>
                                             ) : generatedStickerUrl ? (
                                                 <div className="relative flex flex-col items-center group">
                                                     <img
                                                         src={generatedStickerUrl}
-                                                        alt="Figurinha IA Gerada"
+                                                        alt="Figurinha de Meme Gerada"
                                                         className="w-56 h-56 object-contain drop-shadow-[0_8px_16px_rgba(0,0,0,0.18)] transition-transform hover:scale-105 duration-200"
                                                     />
                                                 </div>
                                             ) : (
                                                 <div className="text-center text-muted-foreground space-y-2 p-4">
                                                     <ImageIcon className="w-10 h-10 mx-auto opacity-40 text-muted-foreground" />
-                                                    <p className="text-xs font-medium">Nenhuma figurinha gerada ainda</p>
+                                                    <p className="text-xs font-medium">Nenhuma figurinha criada ainda</p>
                                                     <p className="text-[11px] text-muted-foreground max-w-[200px]">
-                                                        Digite uma ideia engraçada ao lado e clique em Gerar Figurinha!
+                                                        Anexe uma foto ou digite uma frase de meme ao lado e clique em Criar!
                                                     </p>
                                                 </div>
                                             )}
@@ -449,7 +540,7 @@ export default function StickerPage() {
                         </div>
                     </TabsContent>
 
-                    {/* ABA 2: ENVIO TRADICIONAL (ARQUIVO LOCAL) */}
+                    {/* ABA 2: ENVIO TRADICIONAL (SIMPLES) */}
                     <TabsContent value="traditional" className="mt-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <Card className="shadow-xs border-border/70">
@@ -458,7 +549,7 @@ export default function StickerPage() {
                                         <Layers className="h-4 w-4 text-primary" /> Converter Imagem em Figurinha
                                     </CardTitle>
                                     <CardDescription className="text-xs">
-                                        Envie qualquer foto ou meme do seu computador para transformar em figurinha.
+                                        Envie qualquer foto ou imagem do seu computador para transformar em figurinha.
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="p-4 sm:p-5 space-y-4">

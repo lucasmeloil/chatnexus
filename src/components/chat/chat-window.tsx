@@ -35,6 +35,7 @@ import { EmojiPicker } from "./emoji-picker";
 import { VoiceStudioDialog } from "./voice-studio-dialog";
 import { VoiceProfile, VOICE_PROFILES } from "@/lib/voice-profiles";
 import { AiStickerDialog } from "./ai-sticker-dialog";
+import { AiSummaryDialog } from "./ai-summary-dialog";
 
 interface Message {
     id: string;
@@ -452,6 +453,8 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
     // Transferir Atendimento state
     const [isTransferDialogOpen, setIsTransferDialogOpen] = useState<boolean>(false);
     const [showAiStickerDialog, setShowAiStickerDialog] = useState<boolean>(false);
+    const [isAiSummaryOpen, setIsAiSummaryOpen] = useState<boolean>(false);
+    const [transcriptions, setTranscriptions] = useState<Record<string, { text: string; loading?: boolean }>>({});
     const [availableAttendants, setAvailableAttendants] = useState<any[]>([]);
     const [selectedAttendant, setSelectedAttendant] = useState<string>("QUEUE");
     const [selectedDepartmentTag, setSelectedDepartmentTag] = useState<"Comercial" | "Financeiro" | "Pessoal" | "Suporte">("Comercial");
@@ -1160,6 +1163,41 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
         if (fileInputRef.current) fileInputRef.current.value = "";
     };
 
+    const handleTranscribeAudio = async (msgId: string, mediaUrl: string) => {
+        setTranscriptions(prev => ({ ...prev, [msgId]: { text: "", loading: true } }));
+        try {
+            const formData = new FormData();
+            formData.append("sessionId", sessionId);
+            formData.append("audioUrl", mediaUrl);
+
+            const res = await fetch("/api/chat/transcribe-audio", {
+                method: "POST",
+                body: formData
+            });
+
+            const data = await res.json();
+            if (res.ok && data.status && data.text) {
+                setTranscriptions(prev => ({ ...prev, [msgId]: { text: data.text, loading: false } }));
+                toast.success("Áudio transcrito com sucesso!");
+            } else {
+                setTranscriptions(prev => {
+                    const next = { ...prev };
+                    delete next[msgId];
+                    return next;
+                });
+                toast.error(data.message || "Não foi possível transcrever o áudio.");
+            }
+        } catch (e) {
+            console.error(e);
+            setTranscriptions(prev => {
+                const next = { ...prev };
+                delete next[msgId];
+                return next;
+            });
+            toast.error("Erro ao transcrever áudio.");
+        }
+    };
+
     const triggerUpload = (type: string) => {
         if (isChatFinalized) {
             toast.warning("Este atendimento está finalizado. Reabra o atendimento para enviar arquivos.");
@@ -1617,6 +1655,20 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                    {!isLockedForMe && (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsAiSummaryOpen(true)}
+                            className="h-8 px-2.5 sm:px-3 text-xs gap-1.5 rounded-lg border-purple-500/40 text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 cursor-pointer shadow-xs transition-all font-semibold"
+                            title="Resumo inteligente do histórico da conversa com IA"
+                        >
+                            <Sparkles className="h-3.5 w-3.5 text-purple-500" />
+                            <span className="hidden sm:inline">Resumo IA</span>
+                        </Button>
+                    )}
+
                     {!isContactSaved && !isGroupOrBroadcast && (
                         <Button
                             type="button"
@@ -2289,9 +2341,55 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                         )}
                                         {/* AUDIO */}
                                         {msg.type === 'AUDIO' && msg.mediaUrl && (
-                                            <div className="flex items-center gap-2 mb-1.5">
-                                                <audio src={msg.mediaUrl} controls className="h-8 max-w-[200px]" preload="none" />
-                                                <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full cursor-pointer" onClick={() => handleDownload(msg.mediaUrl!, `AUDIO-${msg.keyId}.mp3`)}><Download className="h-3.5 w-3.5" /></Button>
+                                            <div className="flex flex-col gap-1.5 mb-1.5">
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    <audio src={msg.mediaUrl} controls className="h-8 max-w-[200px]" preload="none" />
+                                                    <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full cursor-pointer" onClick={() => handleDownload(msg.mediaUrl!, `AUDIO-${msg.keyId}.mp3`)} title="Baixar áudio">
+                                                        <Download className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-7 px-2 text-[11px] gap-1 rounded-md text-primary border-primary/30 hover:bg-primary/10 cursor-pointer font-medium"
+                                                        onClick={() => handleTranscribeAudio(msg.id, msg.mediaUrl!)}
+                                                        disabled={transcriptions[msg.id]?.loading}
+                                                        title="Transcrever áudio de voz para texto com IA"
+                                                    >
+                                                        {transcriptions[msg.id]?.loading ? (
+                                                            <>
+                                                                <Loader2 className="h-3 w-3 animate-spin" /> Transcrevendo...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Sparkles className="h-3 w-3 text-primary" /> Transcrever
+                                                            </>
+                                                        )}
+                                                    </Button>
+                                                </div>
+
+                                                {transcriptions[msg.id]?.text && (
+                                                    <div className="p-2.5 rounded-xl bg-black/5 dark:bg-white/5 border border-border/40 text-xs text-foreground/90 leading-relaxed animate-in fade-in slide-in-from-top-1 select-text">
+                                                        <div className="flex items-center justify-between gap-2 mb-1 text-[10px] text-muted-foreground font-semibold">
+                                                            <span className="flex items-center gap-1 text-primary">
+                                                                <Sparkles className="h-2.5 w-2.5" /> Transcrição de Voz:
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    navigator.clipboard.writeText(transcriptions[msg.id].text);
+                                                                    toast.success("Texto transcrito copiado!");
+                                                                }}
+                                                                className="hover:text-foreground cursor-pointer flex items-center gap-0.5"
+                                                                title="Copiar texto"
+                                                            >
+                                                                <Copy className="h-3 w-3" />
+                                                                <span>Copiar</span>
+                                                            </button>
+                                                        </div>
+                                                        <p className="italic font-sans">"{transcriptions[msg.id].text}"</p>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                         {/* STICKER */}
@@ -2829,6 +2927,15 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
             <AiStickerDialog
                 open={showAiStickerDialog}
                 onOpenChange={setShowAiStickerDialog}
+                sessionId={sessionId}
+                jid={jid}
+                clientName={displayName}
+            />
+
+            {/* Diálogo de Resumo Inteligente com IA */}
+            <AiSummaryDialog
+                open={isAiSummaryOpen}
+                onOpenChange={setIsAiSummaryOpen}
                 sessionId={sessionId}
                 jid={jid}
                 clientName={displayName}
