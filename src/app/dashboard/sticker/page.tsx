@@ -38,6 +38,16 @@ const AI_STYLES = [
     { id: "cute", label: "🐱 Mascote Fofo", desc: "Adesivo fofo estilo kawaii com bochechas rosadas" }
 ];
 
+const FUNNY_ACCESSORIES = [
+    { id: "thug_glasses", label: "🕶️ Óculos Thug Life", desc: "Óculos pixelados clássicos de meme" },
+    { id: "clown", label: "🤡 Nariz & Festa", desc: "Nariz vermelho brilhante e chapéu de festa" },
+    { id: "mustache", label: "🥸 Bigode Cômico", desc: "Bigodão curvado de desenho animado" },
+    { id: "laugh_tears", label: "😭 Chorando de Rir", desc: "Jatos de lágrimas estilo emoji 😂" },
+    { id: "laser_eyes", label: "🔥 Olhos Laser", desc: "Olhos vermelhos brilhantes zueira" },
+    { id: "zueira_full", label: "🚀 Zueira Máxima", desc: "Óculos + Bigode + Emojis de risada" },
+    { id: "none", label: "🚫 Sem Acessório", desc: "Apenas efeitos de cor e texto" }
+];
+
 const MEME_PHRASES = [
     "CALMA CALABRESO 😂",
     "PAGOU O BOLETO? 💸",
@@ -58,6 +68,7 @@ export default function StickerPage() {
     const [aiAttachedFile, setAiAttachedFile] = useState<File | null>(null);
     const [aiAttachedPreview, setAiAttachedPreview] = useState<string | null>(null);
     const [aiStyle, setAiStyle] = useState("caricature");
+    const [aiAccessory, setAiAccessory] = useState("thug_glasses");
     const [aiTarget, setAiTarget] = useState("");
     const [aiPack, setAiPack] = useState("Nexus Memes");
     const [aiAuthor, setAiAuthor] = useState("Nexus AI");
@@ -117,6 +128,7 @@ export default function StickerPage() {
             formData.append("prompt", aiPrompt.trim());
             formData.append("memeText", aiMemeText.trim());
             formData.append("style", aiStyle);
+            formData.append("accessory", aiAccessory);
             formData.append("pack", aiPack.trim() || "Nexus Memes");
             formData.append("author", aiAuthor.trim() || "Nexus AI");
 
@@ -358,6 +370,33 @@ export default function StickerPage() {
                                                         {ph}
                                                     </button>
                                                 ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Alteração Cômica / Acessório Engraçado */}
+                                        <div className="space-y-2">
+                                            <Label className="text-xs font-semibold flex items-center gap-1.5">
+                                                <Sparkles className="h-3.5 w-3.5 text-pink-500" /> Alteração Engraçada na Imagem / Meme:
+                                            </Label>
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                                {FUNNY_ACCESSORIES.map(acc => {
+                                                    const isSelected = aiAccessory === acc.id;
+                                                    return (
+                                                        <button
+                                                            key={acc.id}
+                                                            type="button"
+                                                            onClick={() => setAiAccessory(acc.id)}
+                                                            className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                                                                isSelected 
+                                                                    ? "border-pink-500 bg-pink-500/10 text-pink-600 ring-1 ring-pink-500/40 shadow-xs font-semibold" 
+                                                                    : "border-border/60 hover:bg-muted/40 text-foreground"
+                                                            }`}
+                                                        >
+                                                            <div className="text-xs">{acc.label}</div>
+                                                            <div className="text-[10px] text-muted-foreground line-clamp-1 mt-0.5">{acc.desc}</div>
+                                                        </button>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
 

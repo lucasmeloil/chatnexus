@@ -27,6 +27,16 @@ const AI_STYLES = [
     { id: "cute", label: "🐱 Fofo" }
 ];
 
+const FUNNY_ACCESSORIES = [
+    { id: "thug_glasses", label: "🕶️ Óculos Thug Life" },
+    { id: "clown", label: "🤡 Nariz & Festa" },
+    { id: "mustache", label: "🥸 Bigode Cômico" },
+    { id: "laugh_tears", label: "😭 Chorando de Rir" },
+    { id: "laser_eyes", label: "🔥 Olhos Laser" },
+    { id: "zueira_full", label: "🚀 Zueira Máxima" },
+    { id: "none", label: "🚫 Sem Acessório" }
+];
+
 const QUICK_MEMES = [
     "CALMA CALABRESO 😂",
     "PAGOU O BOLETO? 💸",
@@ -45,6 +55,7 @@ export function AiStickerDialog({
     const [prompt, setPrompt] = useState("");
     const [memeText, setMemeText] = useState("");
     const [style, setStyle] = useState("caricature");
+    const [accessory, setAccessory] = useState("thug_glasses");
     const [attachedFile, setAttachedFile] = useState<File | null>(null);
     const [attachedPreview, setAttachedPreview] = useState<string | null>(null);
     const [generating, setGenerating] = useState(false);
@@ -78,6 +89,7 @@ export function AiStickerDialog({
             formData.append("prompt", prompt.trim());
             formData.append("memeText", memeText.trim());
             formData.append("style", style);
+            formData.append("accessory", accessory);
             formData.append("pack", "Nexus Memes");
             formData.append("author", "Nexus Chat");
 
@@ -223,6 +235,29 @@ export function AiStickerDialog({
                                     className="px-1.5 py-0.5 rounded text-[10px] bg-muted/40 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
                                 >
                                     {qm}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Efeito Engraçado / Acessório Cômico */}
+                    <div className="space-y-1">
+                        <Label className="text-xs font-semibold flex items-center gap-1">
+                            <Sparkles className="h-3 w-3 text-pink-500" /> Alteração Engraçada na Imagem:
+                        </Label>
+                        <div className="grid grid-cols-3 gap-1">
+                            {FUNNY_ACCESSORIES.map(acc => (
+                                <button
+                                    key={acc.id}
+                                    type="button"
+                                    onClick={() => setAccessory(acc.id)}
+                                    className={`px-1.5 py-1 rounded border text-center text-[10px] transition-colors cursor-pointer ${
+                                        accessory === acc.id
+                                            ? "border-pink-500 bg-pink-500/10 text-pink-600 font-semibold"
+                                            : "border-border/60 hover:bg-muted/40 text-muted-foreground"
+                                    }`}
+                                >
+                                    {acc.label}
                                 </button>
                             ))}
                         </div>

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/api-auth";
 import { getTypebotConfig } from "@/modules/whatsapp/bot/typebot-engine";
+import path from "path";
+import { existsSync } from "fs";
+import { readFile } from "fs/promises";
 
 export async function POST(req: NextRequest) {
     try {
@@ -17,33 +20,61 @@ export async function POST(req: NextRequest) {
         let audioBuffer: Buffer | null = null;
         let mimeType = "audio/ogg";
 
-        if (audioFile) {
+        if (audioFile && audioFile.size > 0) {
             audioBuffer = Buffer.from(await audioFile.arrayBuffer());
             mimeType = audioFile.type || "audio/ogg";
         } else if (audioUrl) {
-            // Se for URL relativa (/api/media/...), monta URL absoluta local
-            const targetUrl = audioUrl.startsWith("http") 
-                ? audioUrl 
-                : new URL(audioUrl, req.url).toString();
-            
-            const res = await fetch(targetUrl);
-            if (!res.ok) {
-                return NextResponse.json({ status: false, message: "Não foi possível baixar o arquivo de áudio" }, { status: 400 });
+            // 1. Tentar ler diretamente do sistema de arquivos local (evita problemas de SSL/loopback no servidor)
+            const mediaMatch = audioUrl.match(/\/api\/media\/([^?#]+)/);
+            const candidateFilename = mediaMatch 
+                ? decodeURIComponent(mediaMatch[1]) 
+                : (audioUrl.includes("/") ? audioUrl.split("/").pop() || "" : audioUrl);
+
+            if (candidateFilename) {
+                const cleanFilename = path.basename(candidateFilename);
+                const localPath = path.join(process.cwd(), "data", "media", cleanFilename);
+                if (existsSync(localPath)) {
+                    audioBuffer = await readFile(localPath);
+                    const ext = path.extname(cleanFilename).toLowerCase();
+                    if (ext === ".ogg" || ext === ".opus") mimeType = "audio/ogg";
+                    else if (ext === ".mp3") mimeType = "audio/mpeg";
+                    else if (ext === ".wav") mimeType = "audio/wav";
+                    else if (ext === ".m4a") mimeType = "audio/mp4";
+                }
             }
-            audioBuffer = Buffer.from(await res.arrayBuffer());
-            mimeType = res.headers.get("content-type") || "audio/ogg";
+
+            // 2. Se não encontrou no disco local, tentar baixar via fetch HTTP seguro
+            if (!audioBuffer) {
+                try {
+                    let targetUrl = audioUrl;
+                    if (!targetUrl.startsWith("http")) {
+                        const port = process.env.PORT || "3000";
+                        targetUrl = `http://127.0.0.1:${port}${audioUrl.startsWith("/") ? "" : "/"}${audioUrl}`;
+                    }
+                    const res = await fetch(targetUrl, { signal: AbortSignal.timeout(15000) });
+                    if (res.ok) {
+                        audioBuffer = Buffer.from(await res.arrayBuffer());
+                        mimeType = res.headers.get("content-type") || mimeType;
+                    }
+                } catch (fetchErr) {
+                    console.warn("Falha no download secundário do áudio:", fetchErr);
+                }
+            }
         }
 
         if (!audioBuffer || audioBuffer.length === 0) {
-            return NextResponse.json({ status: false, message: "Nenhum áudio fornecido para transcrição" }, { status: 400 });
+            return NextResponse.json({ 
+                status: false, 
+                message: "Não foi possível carregar o arquivo de áudio para transcrição." 
+            }, { status: 400 });
         }
 
-        // Buscar chave disponível: Typebot Config, ENV OPENAI, ENV GROQ
+        // Buscar chaves disponíveis: Typebot Config, ENV OPENAI, ENV GROQ
         const botConfig = sessionId ? getTypebotConfig(sessionId) : null;
         const openaiKey = botConfig?.openaiApiKey?.trim() || process.env.OPENAI_API_KEY?.trim();
-        const groqKey = process.env.GROQ_API_KEY?.trim();
+        const groqKey = (botConfig as any)?.groqApiKey?.trim() || process.env.GROQ_API_KEY?.trim();
 
-        // 1. Tentar Groq Whisper (ultra veloz e gratuito) se configurado
+        // 1. Tentar Groq Whisper (ultra veloz, alta precisão e gratuito na GroqCloud)
         if (groqKey) {
             try {
                 const groqFormData = new FormData();
@@ -55,7 +86,8 @@ export async function POST(req: NextRequest) {
                 const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
                     method: "POST",
                     headers: { Authorization: `Bearer ${groqKey}` },
-                    body: groqFormData
+                    body: groqFormData,
+                    signal: AbortSignal.timeout(30000)
                 });
 
                 if (groqRes.ok) {
@@ -67,6 +99,9 @@ export async function POST(req: NextRequest) {
                             provider: "Groq Whisper"
                         });
                     }
+                } else {
+                    const errText = await groqRes.text();
+                    console.error("Erro Groq Whisper:", errText);
                 }
             } catch (groqErr) {
                 console.error("Falha ao usar Groq Whisper:", groqErr);
@@ -85,7 +120,8 @@ export async function POST(req: NextRequest) {
                 const openaiRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
                     method: "POST",
                     headers: { Authorization: `Bearer ${openaiKey}` },
-                    body: openaiFormData
+                    body: openaiFormData,
+                    signal: AbortSignal.timeout(35000)
                 });
 
                 if (openaiRes.ok) {
@@ -106,38 +142,17 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // 3. Fallback: Hugging Face Serverless Whisper (Gratuito)
-        try {
-            const hfRes = await fetch("https://api-inference.huggingface.co/models/openai/whisper-large-v3", {
-                method: "POST",
-                headers: {
-                    "Content-Type": mimeType
-                },
-                body: new Uint8Array(audioBuffer)
-            });
-
-            if (hfRes.ok) {
-                const hfData = await hfRes.json();
-                if (hfData.text?.trim()) {
-                    return NextResponse.json({
-                        status: true,
-                        text: hfData.text.trim(),
-                        provider: "Whisper IA"
-                    });
-                }
-            }
-        } catch (hfErr) {
-            console.error("Falha no fallback Whisper HuggingFace:", hfErr);
-        }
-
         return NextResponse.json({
             status: false,
-            message: "Para transcrever áudios com precisão máxima, configure a chave OpenAI ou Groq nas configurações do sistema ou no arquivo .env."
+            message: "Para transcrever áudios com inteligência artificial e máxima precisão, adicione a chave GROQ_API_KEY (gratuita na GroqCloud) ou OPENAI_API_KEY no arquivo .env do servidor."
         }, { status: 400 });
 
     } catch (e: any) {
         console.error("Erro na API de transcrição:", e);
-        return NextResponse.json({ status: false, message: e.message || "Erro interno ao transcrever áudio" }, { status: 500 });
+        return NextResponse.json({ 
+            status: false, 
+            message: e.message || "Erro interno ao processar áudio" 
+        }, { status: 500 });
     }
 }
 

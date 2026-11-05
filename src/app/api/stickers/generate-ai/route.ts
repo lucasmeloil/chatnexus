@@ -7,12 +7,12 @@ import Sticker from "wa-sticker-formatter";
 import sharp from "sharp";
 
 const STYLE_PROMPTS: Record<string, string> = {
-    caricature: "exaggerated funny caricature sticker, big head, expressive funny comic face, hilarious laughing expression, clean sticker contour, solid white background",
-    pixar3d: "cute 3D animated movie character sticker, vibrant Pixar render style, glossy finish, funny expression, solid white background, white border outline",
-    meme: "funny internet meme sticker, hilarious reaction face, cool dark sunglasses, humorous vibe, clean sticker cut-out",
-    anime: "chibi anime funny reaction sticker, expressive eyes, cute cartoon shock lines, comic humor, clean vector sticker cut-out, solid white background",
-    party: "celebration party sticker, party hat, confetti, funny joyful laughing face, vibrant colorful sticker contour",
-    cute: "ultra cute kawaii chibi mascot sticker, big sparkling eyes, joyful blush, clean outline border"
+    caricature: "hilarious exaggerated caricature sticker, giant head, ridiculous laughing face, comical silly expression, funny pop art cartoon, vibrant colors, white sticker outline contour, solid white background",
+    pixar3d: "funny 3D animated character sticker, hilarious comedic expression, Pixar cartoon render style, glossy finish, goofy smile, solid white background, white border contour",
+    meme: "iconic internet meme reaction sticker, cool thug life sunglasses, hilarious smirk, funny viral meme humor, clean sticker cut-out",
+    anime: "chibi funny anime reaction sticker, shocked wide comical eyes, sweat drops, anime comedy humor, vector sticker cut-out, solid white background",
+    party: "funny celebration party meme sticker, party hat, confetti explosion, hilarious laughing open mouth, vibrant joyful sticker contour",
+    cute: "ultra cute funny kawaii chibi mascot sticker, goofy wink, joyful funny blush, clean outline border"
 };
 
 function escapeXml(unsafe: string): string {
@@ -28,40 +28,157 @@ function escapeXml(unsafe: string): string {
     });
 }
 
-function createMemeSvgOverlay(text: string, width: number = 512, height: number = 512): Buffer {
-    const cleanText = text.trim().toUpperCase();
-    const words = cleanText.split(/\s+/);
-    
-    // Quebrar em 2 linhas se for longo
-    let line1 = "";
-    let line2 = "";
-    if (words.length <= 4) {
-        line1 = words.join(" ");
-    } else {
-        const mid = Math.ceil(words.length / 2);
-        line1 = words.slice(0, mid).join(" ");
-        line2 = words.slice(mid).join(" ");
+/**
+ * Cria sobreposição SVG com acessórios cômicos (Óculos Thug Life, Bigode, Nariz de Palhaço, Lágrimas, Olhos Laser)
+ * e tipografia clássica de Meme (Impact em branco com contorno preto).
+ */
+function createFunnyMemeSvgOverlay({
+    text = "",
+    accessory = "thug_glasses",
+    width = 512,
+    height = 512
+}: {
+    text?: string;
+    accessory?: string;
+    width?: number;
+    height?: number;
+}): Buffer {
+    let accessoriesSvg = "";
+
+    // 1. Acessórios Cômicos
+    switch (accessory) {
+        case "thug_glasses":
+            accessoriesSvg = `
+            <g id="thug-glasses">
+              <!-- Óculos Thug Life Pixelado -->
+              <rect x="135" y="195" width="105" height="44" fill="#000000" stroke="#111111" stroke-width="2"/>
+              <rect x="143" y="202" width="16" height="12" fill="#ffffff"/>
+              <rect x="163" y="216" width="12" height="10" fill="#ffffff"/>
+              <rect x="240" y="206" width="32" height="12" fill="#000000"/>
+              <rect x="272" y="195" width="105" height="44" fill="#000000" stroke="#111111" stroke-width="2"/>
+              <rect x="280" y="202" width="16" height="12" fill="#ffffff"/>
+              <rect x="300" y="216" width="12" height="10" fill="#ffffff"/>
+              <line x1="115" y1="208" x2="135" y2="208" stroke="#000000" stroke-width="8" stroke-linecap="round"/>
+              <line x1="377" y1="208" x2="397" y2="208" stroke="#000000" stroke-width="8" stroke-linecap="round"/>
+            </g>`;
+            break;
+
+        case "mustache":
+            accessoriesSvg = `
+            <g id="funny-mustache">
+              <path d="M 256,290 C 230,260 170,270 145,310 C 175,330 225,325 256,305 C 287,325 337,330 367,310 C 342,270 282,260 256,290 Z" fill="#18181b" stroke="#000000" stroke-width="3"/>
+            </g>`;
+            break;
+
+        case "clown":
+            accessoriesSvg = `
+            <g id="clown-kit">
+              <!-- Chapeuzinho de Festa / Palhaço -->
+              <polygon points="256,30 190,165 322,165" fill="#f43f5e" stroke="#facc15" stroke-width="5"/>
+              <polygon points="256,30 220,165 292,165" fill="#06b6d4"/>
+              <circle cx="256" cy="25" r="16" fill="#facc15" stroke="#eab308" stroke-width="3"/>
+              <!-- Nariz Vermelho Brilhante -->
+              <circle cx="256" cy="265" r="30" fill="#dc2626" stroke="#991b1b" stroke-width="3"/>
+              <circle cx="245" cy="255" r="8" fill="#ffffff"/>
+            </g>`;
+            break;
+
+        case "laugh_tears":
+            accessoriesSvg = `
+            <g id="laugh-tears">
+              <!-- Jatos Cômicos de Lágrima de Riso -->
+              <path d="M 160,205 Q 105,225 90,285 Q 125,300 148,225 Z" fill="#38bdf8" stroke="#0284c7" stroke-width="3"/>
+              <path d="M 138,235 Q 95,265 85,320 Q 115,330 132,255 Z" fill="#0ea5e9"/>
+              <path d="M 352,205 Q 407,225 422,285 Q 387,300 364,225 Z" fill="#38bdf8" stroke="#0284c7" stroke-width="3"/>
+              <path d="M 374,235 Q 417,265 427,320 Q 397,330 380,255 Z" fill="#0ea5e9"/>
+            </g>`;
+            break;
+
+        case "laser_eyes":
+            accessoriesSvg = `
+            <g id="laser-eyes">
+              <!-- Olhos Laser Meme -->
+              <circle cx="190" cy="210" r="18" fill="#ef4444" opacity="0.85"/>
+              <circle cx="190" cy="210" r="9" fill="#fef08a"/>
+              <line x1="190" y1="210" x2="20" y2="290" stroke="#ef4444" stroke-width="9" stroke-linecap="round"/>
+              <line x1="190" y1="210" x2="20" y2="290" stroke="#fef08a" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="322" cy="210" r="18" fill="#ef4444" opacity="0.85"/>
+              <circle cx="322" cy="210" r="9" fill="#fef08a"/>
+              <line x1="322" y1="210" x2="492" y2="290" stroke="#ef4444" stroke-width="9" stroke-linecap="round"/>
+              <line x1="322" y1="210" x2="492" y2="290" stroke="#fef08a" stroke-width="3" stroke-linecap="round"/>
+            </g>`;
+            break;
+
+        case "zueira_full":
+            accessoriesSvg = `
+            <g id="zueira-full">
+              <!-- Óculos Thug Life -->
+              <rect x="135" y="195" width="105" height="44" fill="#000000" stroke="#111111" stroke-width="2"/>
+              <rect x="143" y="202" width="16" height="12" fill="#ffffff"/>
+              <rect x="163" y="216" width="12" height="10" fill="#ffffff"/>
+              <rect x="240" y="206" width="32" height="12" fill="#000000"/>
+              <rect x="272" y="195" width="105" height="44" fill="#000000" stroke="#111111" stroke-width="2"/>
+              <rect x="280" y="202" width="16" height="12" fill="#ffffff"/>
+              <rect x="300" y="216" width="12" height="10" fill="#ffffff"/>
+              <!-- Bigodão -->
+              <path d="M 256,290 C 230,260 170,270 145,310 C 175,330 225,325 256,305 C 287,325 337,330 367,310 C 342,270 282,260 256,290 Z" fill="#18181b" stroke="#000000" stroke-width="3"/>
+            </g>`;
+            break;
+
+        case "none":
+        default:
+            accessoriesSvg = "";
+            break;
     }
 
-    const fontSize = line2 ? 38 : 44;
-    const yLine1 = line2 ? height - 65 : height - 45;
-    const yLine2 = height - 20;
+    // 2. Tipografia Clássica de Meme (Impact branca com contorno preto reforçado)
+    let textSvg = "";
+    if (text.trim()) {
+        const cleanText = text.trim().toUpperCase();
+        const words = cleanText.split(/\s+/);
+        
+        let line1 = "";
+        let line2 = "";
+        if (words.length <= 4) {
+            line1 = words.join(" ");
+        } else {
+            const mid = Math.ceil(words.length / 2);
+            line1 = words.slice(0, mid).join(" ");
+            line2 = words.slice(mid).join(" ");
+        }
+
+        const fontSize = line2 ? 38 : 44;
+        const yLine1 = line2 ? height - 68 : height - 42;
+        const yLine2 = height - 20;
+
+        textSvg = `
+          <text x="${width / 2}" y="${yLine1}" font-size="${fontSize}px" class="meme-text">${escapeXml(line1)}</text>
+          ${line2 ? `<text x="${width / 2}" y="${yLine2}" font-size="${fontSize}px" class="meme-text">${escapeXml(line2)}</text>` : ""}`;
+    }
 
     const svg = `
     <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+          <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.6"/>
+        </filter>
+      </defs>
       <style>
         .meme-text {
           font-family: Impact, "Arial Black", "Segoe UI Black", sans-serif;
           font-weight: 900;
           fill: #ffffff;
           stroke: #000000;
-          stroke-width: 6px;
+          stroke-width: 7px;
           paint-order: stroke fill;
           text-anchor: middle;
+          filter: drop-shadow(0 3px 5px rgba(0,0,0,0.8));
         }
       </style>
-      <text x="${width / 2}" y="${yLine1}" font-size="${fontSize}px" class="meme-text">${escapeXml(line1)}</text>
-      ${line2 ? `<text x="${width / 2}" y="${yLine2}" font-size="${fontSize}px" class="meme-text">${escapeXml(line2)}</text>` : ""}
+      <g filter="url(#shadow)">
+        ${accessoriesSvg}
+      </g>
+      ${textSvg}
     </svg>`;
 
     return Buffer.from(svg);
@@ -78,6 +195,7 @@ export async function POST(request: NextRequest) {
         const userPrompt = (formData.get("prompt") as string || "").trim();
         const memeText = (formData.get("memeText") as string || "").trim();
         const style = (formData.get("style") as string || "caricature");
+        const accessory = (formData.get("accessory") as string || "thug_glasses");
         const pack = (formData.get("pack") as string || "NEXUS AI");
         const author = (formData.get("author") as string || user.name || "Nexus Chat");
         const sessionId = (formData.get("sessionId") as string || "").trim();
@@ -90,18 +208,25 @@ export async function POST(request: NextRequest) {
         if (attachedFile && attachedFile.size > 0) {
             const rawBuffer = Buffer.from(await attachedFile.arrayBuffer());
             
-            // Redimensionar para 512x512 no padrão sticker do WhatsApp
-            let sharpImg = sharp(rawBuffer).resize(512, 512, {
-                fit: "contain",
-                background: { r: 0, g: 0, b: 0, alpha: 0 }
+            // Tratamento visual para deixar a foto engraçada:
+            // Saturação cômica reforçada + nitidez de desenho/caricatura + redimensionamento 512x512
+            let sharpImg = sharp(rawBuffer)
+                .resize(512, 512, {
+                    fit: "contain",
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
+                })
+                .modulate({ saturation: 1.4, brightness: 1.05 })
+                .sharpen();
+
+            // Gerar sobreposição com os acessórios cômicos (Óculos Thug Life, Bigode, etc.) + Frase de Meme
+            const svgOverlay = createFunnyMemeSvgOverlay({
+                text: memeText,
+                accessory: accessory,
+                width: 512,
+                height: 512
             });
 
-            // Se o usuário digitou uma frase de meme, estampar sobre a foto com tipografia meme
-            if (memeText) {
-                const svgOverlay = createMemeSvgOverlay(memeText, 512, 512);
-                sharpImg = sharpImg.composite([{ input: svgOverlay, top: 0, left: 0 }]);
-            }
-
+            sharpImg = sharpImg.composite([{ input: svgOverlay, top: 0, left: 0 }]);
             baseImageBuffer = await sharpImg.png().toBuffer();
         } 
         // CASO 2: Gerar imagem do zero via IA a partir do Prompt
@@ -116,7 +241,7 @@ export async function POST(request: NextRequest) {
 
             const promptToUse = userPrompt || memeText;
             const styleText = STYLE_PROMPTS[style] || STYLE_PROMPTS.caricature;
-            const finalPrompt = `die-cut sticker of ${promptToUse}, ${styleText}, white background, vibrant colors, expressive funny face, vector illustration, sharp details, sticker style, white border contour, high resolution, no text, no watermark`;
+            const finalPrompt = `hilarious funny comic sticker of ${promptToUse}, ${styleText}, white background, vibrant colors, expressive funny face, ridiculous goofy laughing expression, cartoon caricature, sharp details, sticker style, white border contour, high resolution, no watermark`;
 
             const seed = Math.floor(Math.random() * 1000000);
             const encodedPrompt = encodeURIComponent(finalPrompt);
@@ -137,11 +262,19 @@ export async function POST(request: NextRequest) {
 
             const rawAiBuffer = Buffer.from(await aiResponse.arrayBuffer());
 
-            // Se além do prompt houver frase de meme especificada, estampar sobre a imagem da IA
-            if (memeText) {
-                const svgOverlay = createMemeSvgOverlay(memeText, 512, 512);
+            // Sobrepor frase de meme e acessório engraçado se especificados
+            if (memeText || (accessory && accessory !== "none")) {
+                const svgOverlay = createFunnyMemeSvgOverlay({
+                    text: memeText,
+                    accessory: accessory === "thug_glasses" ? "none" : accessory, // IA já pode ter estilizado óculos se for o caso
+                    width: 512,
+                    height: 512
+                });
+
                 baseImageBuffer = await sharp(rawAiBuffer)
                     .resize(512, 512, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+                    .modulate({ saturation: 1.25, brightness: 1.02 })
+                    .sharpen()
                     .composite([{ input: svgOverlay, top: 0, left: 0 }])
                     .png()
                     .toBuffer();
