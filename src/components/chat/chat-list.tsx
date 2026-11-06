@@ -504,10 +504,19 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
         window.addEventListener("nexus:sound-enabled-changed", handleSoundChange);
         window.addEventListener("nexus:floating-notification-changed", handleFloatingChange);
         window.addEventListener("nexus:mute-active-chat-changed", handleMuteChange);
+
+        const handleOpenChatEvent = (e: any) => {
+            if (e.detail?.selectTab) {
+                setActiveTab(e.detail.selectTab);
+            }
+        };
+        window.addEventListener("nexus:open-chat", handleOpenChatEvent as EventListener);
+
         return () => {
             window.removeEventListener("nexus:sound-enabled-changed", handleSoundChange);
             window.removeEventListener("nexus:floating-notification-changed", handleFloatingChange);
             window.removeEventListener("nexus:mute-active-chat-changed", handleMuteChange);
+            window.removeEventListener("nexus:open-chat", handleOpenChatEvent as EventListener);
         };
     }, []);
 
@@ -766,6 +775,11 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
                     return c;
                 });
             });
+
+            if (payload.action === "transfer" && payload.data?.assignedUserId === currentUserId) {
+                // Refresh list to make sure the transferred chat is fully in "Meus"
+                setTimeout(() => fetchChats(), 300);
+            }
         };
 
         const onChatDeleted = (payload: any) => {

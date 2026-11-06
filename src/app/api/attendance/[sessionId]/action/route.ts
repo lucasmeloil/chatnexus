@@ -53,8 +53,27 @@ export async function POST(
 
         const globalIo = (global as any).io;
         if (globalIo) {
-            globalIo.emit("attendance.update", { sessionId, jid, action, status: action === "reject" ? "CLOSED" : undefined, data: result });
-            globalIo.to(sessionId).emit("attendance.update", { sessionId, jid, action, status: action === "reject" ? "CLOSED" : undefined, data: result });
+            const eventPayload = {
+                sessionId,
+                jid,
+                action,
+                status: action === "reject" ? "CLOSED" : undefined,
+                data: {
+                    ...(result || {}),
+                    transferredByName: user.name || user.email || "Atendente",
+                    transferredById: user.id,
+                    departmentTag: departmentTag || result?.departmentTag || null
+                }
+            };
+
+            globalIo.emit("attendance.update", eventPayload);
+            globalIo.to(sessionId).emit("attendance.update", eventPayload);
+
+            if (action === "transfer") {
+                globalIo.emit("attendance.transfer", eventPayload);
+                globalIo.to(sessionId).emit("attendance.transfer", eventPayload);
+            }
+
             if (action === "reject") {
                 globalIo.emit("chat.deleted", { sessionId, jid });
                 globalIo.to(sessionId).emit("chat.deleted", { sessionId, jid });

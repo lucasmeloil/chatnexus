@@ -2,11 +2,13 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { MessageSquare, X, ArrowRight, BellRing, Volume2 } from "lucide-react";
+import { MessageSquare, X, ArrowRight, BellRing, Volume2, ArrowRightLeft, UserCheck } from "lucide-react";
 import { useSocket } from "@/components/chat/socket-context";
 import { useSession } from "@/components/dashboard/session-provider";
+import { useSession as useAuthSession } from "next-auth/react";
 import {
     playNotificationSound,
+    playTransferNotificationSound,
     sendBrowserNotification,
     requestNotificationPermission,
     unlockAudioSystem,
@@ -27,6 +29,9 @@ interface FloatingAlert {
     cleanPhone: string;
     displayBody: string;
     timestamp: Date;
+    isTransfer?: boolean;
+    transferredBy?: string;
+    departmentTag?: string;
 }
 
 interface IncomingMessagePayload {
@@ -46,10 +51,16 @@ interface IncomingMessagePayload {
 export function MessageNotificationListener() {
     const { socket: socketFromCtx, getSocket } = useSocket();
     const { sessions, sessionId } = useSession();
+    const { data: authSession } = useAuthSession();
     const router = useRouter();
     const [alerts, setAlerts] = useState<FloatingAlert[]>([]);
     const askedPermissionRef = useRef(false);
     const recentAlertsRef = useRef(new Set<string>());
+
+    const currentUserId = authSession?.user?.id;
+    const currentUserRole = (authSession?.user as any)?.role;
+    const currentUserEmail = authSession?.user?.email?.toLowerCase();
+    const isSuperAdmin = currentUserRole === "SUPERADMIN" || currentUserEmail === "admin@nexus.com" || currentUserEmail === "lucasmeloil@pm.me";
 
     const activeSocket = socketFromCtx || getSocket();
 
@@ -209,7 +220,97 @@ export function MessageNotificationListener() {
         }
     }, [sessionId, router]);
 
-    // Attach listeners across all 3 message channels
+    // Process incoming transferred attendance event
+    const processTransfer = useCallback((payload: any) => {
+        if (!payload) return;
+        const data = payload.data || payload;
+        const targetUserId = data.targetUserId || data.assignedUserId;
+        const transferredById = data.transferredById;
+        const transferredByName = data.transferredByName || "Outro atendente";
+        const departmentTag = data.departmentTag || "";
+        const rawJid = payload.jid || data.chatJid || data.jid;
+        if (!rawJid) return;
+
+        // Skip sound and alert for self-initiated transfers
+        if (transferredById && currentUserId && transferredById === currentUserId) return;
+
+        // Verify if transfer is targeted to the logged-in user or Super Admin
+        const isTargetedToMe = (targetUserId && targetUserId === currentUserId) ||
+                              (isSuperAdmin && (!targetUserId || targetUserId === currentUserId));
+
+        if (!isTargetedToMe) return;
+
+        // If notifications are disabled globally by user toggle, skip
+        if (!isNotificationSoundEnabled()) return;
+
+        const cleanPhone = rawJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
+        const deptLabel = departmentTag ? ` [${departmentTag}]` : "";
+        const transferAlertId = `transfer-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+        // 1. Play distinct transfer sound chime (ascending 3-tone chime)
+        playTransferNotificationSound();
+
+        // 2. Trigger native OS/Browser notification
+        sendBrowserNotification(
+            `🔄 Atendimento Transferido!`,
+            {
+                body: `${transferredByName} transferiu o cliente ${cleanPhone}${deptLabel} para você.`,
+                tag: `transfer-${rawJid}`,
+            },
+            () => {
+                if (typeof window !== "undefined") {
+                    window.dispatchEvent(new CustomEvent("nexus:open-chat", {
+                        detail: { jid: rawJid, name: cleanPhone, selectTab: "meus" }
+                    }));
+                }
+                const number = rawJid.split("@")[0];
+                const cleanPath = rawJid.includes("@g.us")
+                    ? `/dashboard/chat/${encodeURIComponent(rawJid)}`
+                    : `/dashboard/chat/${encodeURIComponent(number)}`;
+                router.push(cleanPath);
+            }
+        );
+
+        // 3. Add to visual floating alert card if floating notifications are enabled
+        if (isFloatingNotificationEnabled()) {
+            const newAlert: FloatingAlert = {
+                id: transferAlertId,
+                sessionId: payload.sessionId || sessionId || "",
+                remoteJid: rawJid,
+                senderTitle: `${cleanPhone}${deptLabel}`,
+                cleanPhone,
+                displayBody: `${transferredByName} transferiu este atendimento para você.${departmentTag ? ` Setor: ${departmentTag}.` : ""}`,
+                timestamp: new Date(),
+                isTransfer: true,
+                transferredBy: transferredByName,
+                departmentTag: departmentTag || undefined
+            };
+            setAlerts(prev => [newAlert, ...prev.slice(0, 4)]);
+        }
+
+        // 4. Sonner interactive toast for immediate attention
+        toast.info(`🔄 Atendimento Transferido para Você!`, {
+            description: `${transferredByName} direcionou o cliente ${cleanPhone}${deptLabel}.`,
+            duration: 10000,
+            action: {
+                label: "Atender Agora",
+                onClick: () => {
+                    if (typeof window !== "undefined") {
+                        window.dispatchEvent(new CustomEvent("nexus:open-chat", {
+                            detail: { jid: rawJid, name: cleanPhone, selectTab: "meus" }
+                        }));
+                    }
+                    const number = rawJid.split("@")[0];
+                    const cleanPath = rawJid.includes("@g.us")
+                        ? `/dashboard/chat/${encodeURIComponent(rawJid)}`
+                        : `/dashboard/chat/${encodeURIComponent(number)}`;
+                    router.push(cleanPath);
+                }
+            }
+        });
+    }, [currentUserId, isSuperAdmin, router, sessionId]);
+
+    // Attach listeners across all message and attendance channels
     useEffect(() => {
         const s = activeSocket;
         if (!s) return;
@@ -260,16 +361,31 @@ export function MessageNotificationListener() {
             }
         };
 
+        // Channel 4: Attendance transfer & update notifications
+        const handleAttendanceTransfer = (payload: any) => {
+            processTransfer(payload);
+        };
+
+        const handleAttendanceUpdate = (payload: any) => {
+            if (payload?.action === "transfer") {
+                processTransfer(payload);
+            }
+        };
+
         s.on("incoming.message", handleIncoming);
         s.on("message.update", handleUpdate);
         s.on("message.upsert", handleUpsert);
+        s.on("attendance.transfer", handleAttendanceTransfer);
+        s.on("attendance.update", handleAttendanceUpdate);
 
         return () => {
             s.off("incoming.message", handleIncoming);
             s.off("message.update", handleUpdate);
             s.off("message.upsert", handleUpsert);
+            s.off("attendance.transfer", handleAttendanceTransfer);
+            s.off("attendance.update", handleAttendanceUpdate);
         };
-    }, [activeSocket, processIncoming, sessionId]);
+    }, [activeSocket, processIncoming, processTransfer, sessionId]);
 
     // Global test function for debugging
     useEffect(() => {
@@ -289,8 +405,24 @@ export function MessageNotificationListener() {
                     }
                 });
             };
+
+            (window as any).__nexusTestTransfer = (targetName = "Super Admin") => {
+                unlockAudioSystem();
+                processTransfer({
+                    action: "transfer",
+                    sessionId: sessionId || "test",
+                    jid: "5579998494744@s.whatsapp.net",
+                    data: {
+                        chatJid: "5579998494744@s.whatsapp.net",
+                        assignedUserId: currentUserId || "test-user",
+                        transferredByName: "Eduardo Santos",
+                        transferredById: "other-user",
+                        departmentTag: "Comercial"
+                    }
+                });
+            };
         }
-    }, [processIncoming, sessionId]);
+    }, [processIncoming, processTransfer, sessionId, currentUserId]);
 
     const handleDismiss = (id: string, e?: React.MouseEvent) => {
         if (e) e.stopPropagation();
@@ -327,18 +459,34 @@ export function MessageNotificationListener() {
                 <div
                     key={alert.id}
                     onClick={() => handleOpenChat(alert)}
-                    className="pointer-events-auto cursor-pointer group bg-background/95 backdrop-blur-xl border-2 border-blue-500/50 shadow-2xl rounded-2xl p-4 transition-all duration-300 hover:scale-[1.02] hover:border-blue-500 relative overflow-hidden animate-in slide-in-from-top-4 fade-in"
+                    className={
+                        alert.isTransfer
+                            ? "pointer-events-auto cursor-pointer group bg-background/95 backdrop-blur-xl border-2 border-purple-500/80 shadow-2xl rounded-2xl p-4 transition-all duration-300 hover:scale-[1.02] hover:border-purple-500 relative overflow-hidden animate-in slide-in-from-top-4 fade-in ring-2 ring-purple-500/20"
+                            : "pointer-events-auto cursor-pointer group bg-background/95 backdrop-blur-xl border-2 border-blue-500/50 shadow-2xl rounded-2xl p-4 transition-all duration-300 hover:scale-[1.02] hover:border-blue-500 relative overflow-hidden animate-in slide-in-from-top-4 fade-in"
+                    }
                 >
                     {/* Top highlight animated gradient bar */}
-                    <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-blue-600 via-cyan-500 to-sky-400" />
+                    {alert.isTransfer ? (
+                        <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-purple-600 via-pink-500 to-indigo-500 animate-pulse" />
+                    ) : (
+                        <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-blue-600 via-cyan-500 to-sky-400" />
+                    )}
 
                     <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="h-10 w-10 rounded-full bg-blue-500/15 border border-blue-500/30 flex items-center justify-center shrink-0 text-blue-600 dark:text-blue-400 relative">
-                                <MessageSquare className="h-5 w-5" />
-                                <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-blue-500 rounded-full animate-ping" />
-                                <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-blue-500 rounded-full" />
-                            </div>
+                            {alert.isTransfer ? (
+                                <div className="h-10 w-10 rounded-full bg-purple-500/15 border border-purple-500/30 flex items-center justify-center shrink-0 text-purple-600 dark:text-purple-400 relative">
+                                    <ArrowRightLeft className="h-5 w-5" />
+                                    <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-purple-500 rounded-full animate-ping" />
+                                    <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-purple-500 rounded-full" />
+                                </div>
+                            ) : (
+                                <div className="h-10 w-10 rounded-full bg-blue-500/15 border border-blue-500/30 flex items-center justify-center shrink-0 text-blue-600 dark:text-blue-400 relative">
+                                    <MessageSquare className="h-5 w-5" />
+                                    <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-blue-500 rounded-full animate-ping" />
+                                    <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-blue-500 rounded-full" />
+                                </div>
+                            )}
 
                             <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
@@ -346,9 +494,15 @@ export function MessageNotificationListener() {
                                         {alert.senderTitle}
                                     </span>
                                 </div>
-                                <span className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-1">
-                                    <BellRing className="h-3 w-3 inline animate-bounce" /> Nova mensagem recebida
-                                </span>
+                                {alert.isTransfer ? (
+                                    <span className="text-[11px] text-purple-600 dark:text-purple-400 font-bold flex items-center gap-1">
+                                        <ArrowRightLeft className="h-3 w-3 inline animate-pulse" /> Atendimento Transferido
+                                    </span>
+                                ) : (
+                                    <span className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-1">
+                                        <BellRing className="h-3 w-3 inline animate-bounce" /> Nova mensagem recebida
+                                    </span>
+                                )}
                             </div>
                         </div>
 
@@ -361,7 +515,11 @@ export function MessageNotificationListener() {
                         </button>
                     </div>
 
-                    <div className="mt-2.5 text-xs text-foreground/90 bg-muted/40 p-2.5 rounded-xl line-clamp-2 border border-border/40 font-medium">
+                    <div className={
+                        alert.isTransfer
+                            ? "mt-2.5 text-xs text-foreground/90 bg-purple-500/10 dark:bg-purple-950/20 p-2.5 rounded-xl line-clamp-2 border border-purple-500/20 font-medium"
+                            : "mt-2.5 text-xs text-foreground/90 bg-muted/40 p-2.5 rounded-xl line-clamp-2 border border-border/40 font-medium"
+                    }>
                         {alert.displayBody}
                     </div>
 
@@ -370,18 +528,33 @@ export function MessageNotificationListener() {
                             {alert.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </span>
 
-                        <Button
-                            size="sm"
-                            variant="default"
-                            className="h-7 px-3 text-xs gap-1.5 font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenChat(alert);
-                            }}
-                        >
-                            <span>Abrir Conversa</span>
-                            <ArrowRight className="h-3.5 w-3.5" />
-                        </Button>
+                        {alert.isTransfer ? (
+                            <Button
+                                size="sm"
+                                variant="default"
+                                className="h-7 px-3 text-xs gap-1.5 font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg shadow-md"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenChat(alert);
+                                }}
+                            >
+                                <span>Atender Agora</span>
+                                <ArrowRight className="h-3.5 w-3.5" />
+                            </Button>
+                        ) : (
+                            <Button
+                                size="sm"
+                                variant="default"
+                                className="h-7 px-3 text-xs gap-1.5 font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenChat(alert);
+                                }}
+                            >
+                                <span>Abrir Conversa</span>
+                                <ArrowRight className="h-3.5 w-3.5" />
+                            </Button>
+                        )}
                     </div>
                 </div>
             ))}

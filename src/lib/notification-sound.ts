@@ -415,6 +415,44 @@ export function playNotificationSound(): void {
     previewNotificationSound(config.type, config.volume, config.customAudioData);
 }
 
+/**
+ * Plays a distinct 3-tone ascending alert chime specifically designed for transferred attendances
+ */
+export function playTransferNotificationSound(): void {
+    if (!isNotificationSoundEnabled()) return;
+    if (typeof window === "undefined") return;
+
+    try {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+        if (ctx.state === "suspended") {
+            ctx.resume().catch(() => {});
+        }
+
+        const now = ctx.currentTime;
+        const config = getNotificationSoundConfig();
+        const vol = Math.max(0.2, Math.min(1, (config.volume || 80) / 100));
+
+        // Ascending harmonic chime: C5 (523.25) -> E5 (659.25) -> G5 (783.99)
+        const notes = [523.25, 659.25, 783.99];
+        notes.forEach((freq, idx) => {
+            const start = now + idx * 0.11;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(freq, start);
+            gain.gain.setValueAtTime(0.38 * vol, start);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.42);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(start);
+            osc.stop(start + 0.42);
+        });
+    } catch (e) {
+        console.debug("Transfer sound playback failed", e);
+    }
+}
+
 
 export async function requestNotificationPermission(): Promise<boolean> {
     if (typeof window === "undefined" || !("Notification" in window)) return false;
