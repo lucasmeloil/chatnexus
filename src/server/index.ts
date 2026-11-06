@@ -56,11 +56,13 @@ app.prepare().then(() => {
   // Start Scheduler
   import("../modules/whatsapp/scheduler").then(m => m.startScheduler());
 
-  // Ensure Master Admin privileges for lucasmeloil@pm.me & disable public registration
+  // Ensure Master Admin privileges for admin@nexus.com & lucasmeloil@pm.me & disable public registration
   import("../lib/prisma").then(async ({ prisma }) => {
     try {
       await prisma.user.updateMany({
-        where: { email: "lucasmeloil@pm.me" },
+        where: {
+          email: { in: ["admin@nexus.com", "lucasmeloil@pm.me"] }
+        },
         data: { role: "SUPERADMIN" }
       });
       await prisma.systemConfig.upsert({

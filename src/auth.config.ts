@@ -1,6 +1,15 @@
 import type { NextAuthConfig } from "next-auth";
 
-const MASTER_ADMIN_EMAIL = "lucasmeloil@pm.me";
+const MASTER_ADMIN_EMAILS = [
+    "admin@nexus.com",
+    "lucasmeloil@pm.me"
+];
+
+function isMasterEmail(email?: string | null): boolean {
+    if (!email) return false;
+    const clean = email.toLowerCase().trim();
+    return MASTER_ADMIN_EMAILS.some(e => e.toLowerCase() === clean);
+}
 
 export const authConfig = {
     pages: {
@@ -25,7 +34,7 @@ export const authConfig = {
                 token.role = (user as any).role;
                 token.email = user.email;
             }
-            if (token.email && token.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+            if (isMasterEmail(token.email as string)) {
                 token.role = "SUPERADMIN";
             }
             return token;
@@ -33,8 +42,7 @@ export const authConfig = {
         async session({ session, token }) {
             if (token && session.user) {
                 session.user.id = token.id as string;
-                const isMaster = (token.email && token.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) || 
-                                 (session.user.email && session.user.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase());
+                const isMaster = isMasterEmail(token.email as string) || isMasterEmail(session.user.email);
                 (session.user as any).role = isMaster ? "SUPERADMIN" : token.role;
             }
             return session;

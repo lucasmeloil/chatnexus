@@ -3,7 +3,17 @@ import { NextRequest } from "next/server";
 import { auth } from "./auth";
 import { logger } from "./logger";
 
-export const MASTER_ADMIN_EMAIL = "lucasmeloil@pm.me";
+export const MASTER_ADMIN_EMAILS = [
+    "admin@nexus.com",
+    "lucasmeloil@pm.me"
+];
+export const MASTER_ADMIN_EMAIL = "admin@nexus.com";
+
+export function isMasterAdminEmail(email?: string | null): boolean {
+    if (!email) return false;
+    const clean = email.trim().toLowerCase();
+    return MASTER_ADMIN_EMAILS.some(e => e.toLowerCase() === clean);
+}
 
 // Role hierarchy for permission checks
 const ROLE_HIERARCHY = {
@@ -30,7 +40,7 @@ export async function validateApiKey(request: NextRequest) {
             select: { id: true, email: true, name: true, role: true }
         });
 
-        if (user && user.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+        if (user && isMasterAdminEmail(user.email)) {
             user.role = "SUPERADMIN";
         }
 
@@ -64,7 +74,7 @@ export async function getAuthenticatedUser(request?: NextRequest) {
 
         if (user) {
             // Guarantee Master Admin has SUPERADMIN role in DB and memory
-            if (user.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase() && user.role !== "SUPERADMIN") {
+            if (isMasterAdminEmail(user.email) && user.role !== "SUPERADMIN") {
                 await prisma.user.update({
                     where: { id: user.id },
                     data: { role: "SUPERADMIN" }
@@ -82,7 +92,7 @@ export async function getAuthenticatedUser(request?: NextRequest) {
  * Check if user has required role level
  */
 export function hasRole(userRole: string, requiredRole: Role, email?: string): boolean {
-    if (email && email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+    if (isMasterAdminEmail(email)) {
         return true;
     }
     const userLevel = ROLE_HIERARCHY[userRole as Role] || 0;
@@ -94,7 +104,7 @@ export function hasRole(userRole: string, requiredRole: Role, email?: string): b
  * Check if user is admin (SUPERADMIN or Master Admin email)
  */
 export function isAdmin(userRole: string, email?: string): boolean {
-    if (email && email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
+    if (isMasterAdminEmail(email)) {
         return true;
     }
     return userRole === "SUPERADMIN";
@@ -144,7 +154,30 @@ export async function canAccessSession(userId: string, userRole: string, session
         }
     });
 
-    return !!sharedAccess;
+    if (sharedAccess) return true;
+
+    // Se o atendente não tem acesso explícito ainda, auto-conceder acesso à sessão conectada da empresa
+    const companySession = await prisma.session.findFirst({
+        where: {
+            OR: [
+                { id: sessionId },
+                { sessionId: sessionId }
+            ]
+        },
+        select: { id: true }
+    });
+
+    if (companySession) {
+        await prisma.sessionAccess.create({
+            data: {
+                sessionId: companySession.id,
+                userId
+            }
+        }).catch(() => {});
+        return true;
+    }
+
+    return false;
 }
 
 /**
@@ -229,6 +262,44 @@ export async function getAccessibleSessions(userId: string, userRole: string, em
             select: { sessionId: true }
         })
     ]);
+
+    // Se o atendente não é dono e ainda não tem sessão vinculada, vincular automaticamente às sessões da empresa
+    if (ownedSessions.length === 0 && sharedAccess.length === 0) {
+        const allCompanySessions = await prisma.session.findMany({
+            orderBy: { createdAt: 'desc' },
+            include: {
+                user: {
+                    select: {
+                        name: true,
+                        email: true
+                    }
+                },
+                botConfig: true,
+                webhooks: true,
+                _count: {
+                    select: {
+                        contacts: true,
+                        messages: true,
+                        groups: true,
+                        autoReplies: true,
+                        scheduledMessages: true
+                    }
+                }
+            }
+        });
+
+        if (allCompanySessions.length > 0) {
+            await prisma.sessionAccess.createMany({
+                data: allCompanySessions.map(s => ({
+                    sessionId: s.id,
+                    userId
+                })),
+                skipDuplicates: true
+            }).catch(() => {});
+            return allCompanySessions;
+        }
+        return [];
+    }
 
     if (sharedAccess.length === 0) return ownedSessions;
 

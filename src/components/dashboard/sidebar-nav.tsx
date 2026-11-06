@@ -57,7 +57,7 @@ const navGroups: NavGroup[] = [
         label: "Principal",
         items: [
             { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-            { href: "/dashboard/sessions", label: "Sessões / QR Code", icon: QrCode },
+            { href: "/dashboard/sessions", label: "Sessões / QR Code", icon: QrCode, superadminOnly: true },
         ],
     },
     {
@@ -98,7 +98,7 @@ const navGroups: NavGroup[] = [
         label: "Administração",
         items: [
             { href: "/dashboard/media", label: "Gerenciador de Mídia", icon: HardDrive },
-            { href: "/dashboard/sessions/access", label: "Acesso a Sessões", icon: UserPlus },
+            { href: "/dashboard/sessions/access", label: "Acesso a Sessões", icon: UserPlus, superadminOnly: true },
             { href: "/dashboard/users", label: "Usuários", icon: Users, superadminOnly: true },
             { href: "/dashboard/settings", label: "Configurações", icon: Settings },
             { href: "/dashboard/system-monitor", label: "Monitor do Sistema", icon: Activity, superadminOnly: true },
@@ -113,7 +113,8 @@ export function SidebarNav() {
     const { isCollapsed, toggleCollapse } = useSidebar();
     // @ts-ignore
     const userRole = session?.user?.role;
-    const isSuperAdmin = userRole === "SUPERADMIN" || session?.user?.email?.toLowerCase() === "lucasmeloil@pm.me";
+    const userEmail = session?.user?.email?.toLowerCase();
+    const isSuperAdmin = userRole === "SUPERADMIN" || userEmail === "admin@nexus.com" || userEmail === "lucasmeloil@pm.me";
 
     // Track collapsed groups — all expanded by default
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});

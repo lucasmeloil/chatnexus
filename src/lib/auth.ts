@@ -5,7 +5,16 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { authConfig } from "@/auth.config";
 
-const MASTER_ADMIN_EMAIL = "lucasmeloil@pm.me";
+const MASTER_ADMIN_EMAILS = [
+  "admin@nexus.com",
+  "lucasmeloil@pm.me"
+];
+
+function isMasterEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const clean = email.toLowerCase().trim();
+  return MASTER_ADMIN_EMAILS.some(e => e.toLowerCase() === clean);
+}
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   ...authConfig,
@@ -31,7 +40,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
           if (passwordsMatch) {
              // Guarantee Master Admin has SUPERADMIN role
-             if (cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase() && user.role !== "SUPERADMIN") {
+             if (isMasterEmail(cleanEmail) && user.role !== "SUPERADMIN") {
                await prisma.user.update({
                  where: { id: user.id },
                  data: { role: "SUPERADMIN" },

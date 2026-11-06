@@ -1,6 +1,7 @@
 import { auth } from "./auth";
 import { prisma } from "./prisma";
 import { logger } from "./logger";
+import { isMasterAdminEmail } from "./api-auth";
 
 /**
  * Gets the currently authenticated user from Next Auth without requiring a Request object.
@@ -18,6 +19,9 @@ export async function getAuthenticatedUserForAction() {
             });
 
             if (user) {
+                if (isMasterAdminEmail(user.email)) {
+                    user.role = "SUPERADMIN";
+                }
                 return user;
             }
         }

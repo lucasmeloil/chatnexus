@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const user = await getAuthenticatedUser(request);
 
     // Only SUPERADMIN can list users
-    if (!user || !isAdmin(user.role)) {
+    if (!user || !isAdmin(user.role, user.email)) {
         return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 403 });
     }
 
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     const user = await getAuthenticatedUser(request);
 
     // Only SUPERADMIN can create users
-    if (!user || !isAdmin(user.role)) {
+    if (!user || !isAdmin(user.role, user.email)) {
         return NextResponse.json({ status: false, message: "Unauthorized", error: "Unauthorized" }, { status: 403 });
     }
 
@@ -81,6 +81,22 @@ export async function POST(request: NextRequest) {
                 createdAt: true
             }
         });
+
+        // Auto-link new attendant to all active WhatsApp sessions so they never need to scan QR code
+        try {
+            const allSessions = await prisma.session.findMany({ select: { id: true } });
+            if (allSessions.length > 0) {
+                await prisma.sessionAccess.createMany({
+                    data: allSessions.map(s => ({
+                        sessionId: s.id,
+                        userId: newUser.id
+                    })),
+                    skipDuplicates: true
+                });
+            }
+        } catch (linkErr) {
+            console.error("Auto session link error on user creation:", linkErr);
+        }
 
         return NextResponse.json({ status: true, message: "User created successfully", data: newUser }, { status: 201 });
 
