@@ -479,36 +479,34 @@ export function AnalyticsDashboard({ initialData }: AnalyticsDashboardProps) {
 
     return (
         <div className="space-y-6 pb-12">
-            {/* Header com Barra de Controles e Status Estável Sem Piscamento */}
-            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary/10 via-primary/5 to-blue-500/10 border border-primary/20 p-5 shadow-xs">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                    {/* Título e Status */}
-                    <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                                <span className="h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-emerald-400/40" />
-                                {liveSyncEnabled ? "Sincronização Ativa" : "Pausado"}
-                            </span>
+            {/* Header Moderno & Futurista: Fundo Claro do Tema, Telemetria Integrada e Alinhamento Perfeito */}
+            <div className="relative overflow-hidden rounded-2xl bg-card/90 backdrop-blur-xl border border-border/60 p-5 sm:p-6 shadow-xs">
+                {/* Linha de feixe de luz futurista no topo */}
+                <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-primary/60 via-sky-400/50 to-emerald-400/50" />
 
-                            <span className="text-xs text-muted-foreground font-mono flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                Atualizado: {lastSyncTime.toLocaleTimeString("pt-BR")}
-                            </span>
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-5">
+                    {/* Título e Subtítulo Limpos (sem poluição no topo) */}
+                    <div className="space-y-1.5">
+                        <div className="flex items-center gap-2.5">
+                            <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-2xs">
+                                <Activity className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+                                    Dashboard Analítico de Atendimento
+                                    <Sparkles className="h-4 w-4 text-amber-500" />
+                                </h1>
+                            </div>
                         </div>
-
-                        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-2">
-                            Dashboard Analítico de Atendimento
-                            <Sparkles className="h-5 w-5 text-amber-500" />
-                        </h1>
-                        <p className="text-xs sm:text-sm text-muted-foreground max-w-2xl">
-                            Visão panorâmica com telemetria 100% real: fluxo operacional, produtividade dos atendentes, tempo de resposta, canais e mídias.
+                        <p className="text-xs sm:text-sm text-muted-foreground max-w-2xl pl-11">
+                            Visão panorâmica em tempo real com telemetria operacional, fluxo de conversas, produtividade e métricas de SLA.
                         </p>
                     </div>
 
-                    {/* Ações e Controles de Sincronização */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                        {/* Seletor de Período */}
-                        <div className="flex items-center bg-background/80 backdrop-blur-md rounded-xl p-1 border border-border/60 shadow-xs">
+                    {/* Ações e Controles Superiores Perfeitamente Alinhados */}
+                    <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+                        {/* Seletor de Período Estilo Segmented Control Futurista */}
+                        <div className="flex items-center bg-muted/40 backdrop-blur-md rounded-xl p-1 border border-border/50 shadow-2xs">
                             {(["today", "7d", "30d", "all"] as const).map((p) => {
                                 const labels: Record<string, string> = {
                                     today: "Hoje",
@@ -523,7 +521,7 @@ export function AnalyticsDashboard({ initialData }: AnalyticsDashboardProps) {
                                         className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                                             period === p
                                                 ? "bg-primary text-primary-foreground shadow-xs"
-                                                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                                : "text-muted-foreground hover:text-foreground hover:bg-background/80"
                                         }`}
                                     >
                                         {labels[p]}
@@ -532,25 +530,25 @@ export function AnalyticsDashboard({ initialData }: AnalyticsDashboardProps) {
                             })}
                         </div>
 
-                        {/* Botão Sincronizar Agora */}
+                        {/* Botão Atualizar */}
                         <Button
                             variant="outline"
                             size="sm"
                             onClick={() => fetchMetrics(false)}
                             disabled={isRefreshing}
-                            className="gap-2 border-border/70 hover:bg-primary/10 hover:border-primary/40 font-medium text-xs h-9 cursor-pointer"
+                            className="gap-2 h-9 px-3.5 border-border/70 bg-card hover:bg-primary/10 hover:border-primary/40 font-medium text-xs cursor-pointer shadow-2xs"
                         >
                             <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin text-primary" : ""}`} />
                             Atualizar
                         </Button>
 
-                        {/* Exportar Excel */}
+                        {/* Botão Baixar Excel */}
                         <Button
                             variant="outline"
                             size="sm"
                             onClick={handleExportExcel}
                             title="Exportar Relatório em Planilha Excel com Tabelas Modernas e Coloridas"
-                            className="gap-1.5 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 hover:border-emerald-500/60 font-semibold text-xs h-9 cursor-pointer shadow-2xs"
+                            className="gap-2 h-9 px-3.5 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-emerald-500/5 hover:bg-emerald-500/15 hover:border-emerald-500/60 font-semibold text-xs cursor-pointer shadow-2xs transition-all"
                         >
                             <Download className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                             Baixar Excel
@@ -558,52 +556,85 @@ export function AnalyticsDashboard({ initialData }: AnalyticsDashboardProps) {
                     </div>
                 </div>
 
-                {/* Filtros Secundários: Sessão e Departamento */}
-                <div className="mt-4 pt-3 border-t border-border/30 flex flex-wrap items-center gap-3 text-xs">
-                    <span className="text-muted-foreground font-semibold flex items-center gap-1">
-                        <Filter className="h-3.5 w-3.5 text-primary" /> Filtrar por:
-                    </span>
+                {/* Toolbar Inferior Futurista: Filtros Operacionais + Telemetria Ao Vivo Integrada */}
+                <div className="mt-5 pt-3.5 border-t border-border/40 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    {/* Bloco de Filtros à Esquerda */}
+                    <div className="flex flex-wrap items-center gap-2.5">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground/80 px-1">
+                            <SlidersHorizontal className="h-3.5 w-3.5 text-primary" />
+                            <span>Filtrar por:</span>
+                        </div>
 
-                    {/* Filtro de Sessão WhatsApp */}
-                    <select
-                        value={selectedSession}
-                        onChange={(e) => setSelectedSession(e.target.value)}
-                        className="bg-background/90 border border-border/70 rounded-lg px-2.5 py-1.5 text-xs font-medium focus:ring-1 focus:ring-primary outline-hidden cursor-pointer"
-                    >
-                        <option value="all">Todas as Sessões ({metrics?.sessions.length || 0})</option>
-                        {metrics?.sessions.map((sess) => (
-                            <option key={sess.id} value={sess.id}>
-                                {sess.name} ({sess.status === "CONNECTED" ? "Online" : "Offline"})
-                            </option>
-                        ))}
-                    </select>
+                        {/* Filtro de Sessão WhatsApp */}
+                        <div className="relative">
+                            <select
+                                value={selectedSession}
+                                onChange={(e) => setSelectedSession(e.target.value)}
+                                className="bg-background/90 border border-border/70 hover:border-border rounded-lg pl-3 pr-7 py-1.5 text-xs font-medium focus:ring-2 focus:ring-primary/20 outline-hidden cursor-pointer shadow-2xs transition-colors"
+                            >
+                                <option value="all">Todas as Sessões ({metrics?.sessions.length || 0})</option>
+                                {metrics?.sessions.map((sess) => (
+                                    <option key={sess.id} value={sess.id}>
+                                        {sess.name} ({sess.status === "CONNECTED" ? "Online" : "Offline"})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
 
-                    {/* Filtro de Departamento */}
-                    <select
-                        value={selectedDepartment}
-                        onChange={(e) => setSelectedDepartment(e.target.value)}
-                        className="bg-background/90 border border-border/70 rounded-lg px-2.5 py-1.5 text-xs font-medium focus:ring-1 focus:ring-primary outline-hidden cursor-pointer"
-                    >
-                        <option value="all">Todos os Departamentos</option>
-                        {metrics?.departments.map((dept) => (
-                            <option key={dept.name} value={dept.name}>
-                                {dept.name} ({dept.count})
-                            </option>
-                        ))}
-                    </select>
+                        {/* Filtro de Departamento */}
+                        <div className="relative">
+                            <select
+                                value={selectedDepartment}
+                                onChange={(e) => setSelectedDepartment(e.target.value)}
+                                className="bg-background/90 border border-border/70 hover:border-border rounded-lg pl-3 pr-7 py-1.5 text-xs font-medium focus:ring-2 focus:ring-primary/20 outline-hidden cursor-pointer shadow-2xs transition-colors"
+                            >
+                                <option value="all">Todos os Departamentos</option>
+                                {metrics?.departments.map((dept) => (
+                                    <option key={dept.name} value={dept.name}>
+                                        {dept.name} ({dept.count})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
 
-                    {/* Toggle Live Sync */}
-                    <div className="ml-auto flex items-center gap-2">
-                        <span className="text-muted-foreground">Auto-refresh:</span>
-                        <select
-                            value={syncIntervalSeconds}
-                            onChange={(e) => setSyncIntervalSeconds(Number(e.target.value))}
-                            className="bg-background/90 border border-border/70 rounded-lg px-2 py-1 text-xs font-medium cursor-pointer"
-                        >
-                            <option value={10}>10s</option>
-                            <option value={30}>30s</option>
-                            <option value={60}>1 min</option>
-                        </select>
+                    {/* Bloco de Telemetria Ao Vivo & Auto-Refresh à Direita */}
+                    <div className="flex items-center gap-3 ml-auto sm:ml-0">
+                        {/* Status de Sincronização em Tempo Real (Realtime Badge) */}
+                        <div className="flex items-center gap-2 bg-muted/40 border border-border/50 rounded-lg px-2.5 py-1 text-xs">
+                            <span className="relative flex h-2 w-2">
+                                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                                    liveSyncEnabled ? "bg-emerald-400" : "bg-amber-400"
+                                }`} />
+                                <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                                    liveSyncEnabled ? "bg-emerald-500" : "bg-amber-500"
+                                }`} />
+                            </span>
+                            <span className={`text-[11px] font-semibold tracking-wide ${
+                                liveSyncEnabled ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+                            }`}>
+                                {liveSyncEnabled ? "Ao Vivo" : "Pausado"}
+                            </span>
+                            <span className="text-border">|</span>
+                            <span className="text-muted-foreground text-[11px] font-mono flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {lastSyncTime.toLocaleTimeString("pt-BR")}
+                            </span>
+                        </div>
+
+                        {/* Seletor de Intervalo Auto-Refresh */}
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span>Auto-refresh:</span>
+                            <select
+                                value={syncIntervalSeconds}
+                                onChange={(e) => setSyncIntervalSeconds(Number(e.target.value))}
+                                className="bg-background/90 border border-border/70 hover:border-border rounded-lg px-2 py-1 text-xs font-medium cursor-pointer focus:ring-2 focus:ring-primary/20 outline-hidden shadow-2xs"
+                            >
+                                <option value={10}>10s</option>
+                                <option value={30}>30s</option>
+                                <option value={60}>1 min</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
             </div>
