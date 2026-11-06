@@ -203,7 +203,7 @@ export function Navbar({ appName }: NavbarProps) {
     };
 
     return (
-        <header className="bg-background/40 backdrop-blur-2xl border-b border-border/50 h-16 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-30 w-full shadow-sm">
+        <header className="bg-background/80 backdrop-blur-xl border-b border-border/40 h-14 sm:h-16 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-30 w-full shadow-xs">
             <div className="flex items-center gap-3">
                 <MobileNav appName={appName} />
             </div>

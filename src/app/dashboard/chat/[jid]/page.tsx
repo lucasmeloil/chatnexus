@@ -39,7 +39,7 @@ export default async function ChatWithJidPage({
     }
 
     return (
-        <div className="h-[calc(100vh-6.5rem)] sm:h-[calc(100vh-6rem)]">
+        <div className="h-[calc(100vh-8.5rem)] sm:h-[calc(100vh-8rem)] min-h-[500px]">
             <ChatLayoutClient
                 key={`${validSessionId}-${resolvedJid}`}
                 sessionId={validSessionId}

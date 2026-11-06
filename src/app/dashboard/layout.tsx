@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth";
 import { Navbar } from "@/components/dashboard/navbar";
+import { DashboardFooter } from "@/components/dashboard/footer";
 import { SessionProvider } from "@/components/dashboard/session-provider";
 import { SidebarProvider } from "@/components/dashboard/sidebar-context";
 import { SidebarShell } from "@/components/dashboard/sidebar-shell";
@@ -46,9 +47,10 @@ export default async function DashboardLayout({
                     {/* Main Content */}
                     <div className="flex-1 flex flex-col overflow-hidden min-w-0 relative z-10" suppressHydrationWarning={true}>
                         <Navbar appName={appName} />
-                        <main className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 styled-scrollbar">
+                        <main className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 styled-scrollbar min-h-0">
                             {children}
                         </main>
+                        <DashboardFooter />
                     </div>
                     <Toaster position="top-right" richColors />
                 </div>

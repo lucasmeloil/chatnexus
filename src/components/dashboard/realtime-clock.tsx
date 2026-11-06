@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from "react";
 import moment from "moment-timezone";
-import { Clock } from "lucide-react";
 
 export function RealtimeClock() {
-    const [time, setTime] = useState("");
+    const [hours, setHours] = useState("--");
+    const [minutes, setMinutes] = useState("--");
+    const [seconds, setSeconds] = useState("--");
+    const [dateStr, setDateStr] = useState("");
     const [timezone, setTimezone] = useState("America/Sao_Paulo");
     const [mounted, setMounted] = useState(false);
+    const [blink, setBlink] = useState(true);
 
     useEffect(() => {
         setMounted(true);
@@ -26,7 +29,12 @@ export function RealtimeClock() {
         if (!mounted) return;
 
         const updateTime = () => {
-            setTime(moment().tz(timezone).format("HH:mm:ss"));
+            const now = moment().tz(timezone);
+            setHours(now.format("HH"));
+            setMinutes(now.format("mm"));
+            setSeconds(now.format("ss"));
+            setDateStr(now.format("DD/MM/YYYY"));
+            setBlink(prev => !prev);
         };
 
         updateTime();
@@ -36,11 +44,38 @@ export function RealtimeClock() {
 
     if (!mounted) return null;
 
+    // Clean display for timezone label (e.g. "São Paulo", "Brasília", etc.)
+    const cleanTz = timezone.replace(/_/g, " ").split("/").pop() || timezone;
+
     return (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-md border border-slate-200 text-sm font-medium text-slate-700">
-            <Clock className="h-4 w-4 text-slate-500" />
-            <span>{time}</span>
-            <span className="text-xs text-slate-400 border-l border-slate-300 pl-2 ml-1">{timezone}</span>
+        <div 
+            title={`Horário oficial (${timezone}) • ${dateStr}`}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-950/90 dark:bg-black border border-emerald-500/40 shadow-[inset_0_2px_4px_rgba(0,0,0,0.8),0_0_14px_rgba(16,185,129,0.2)] text-emerald-400 select-none relative overflow-hidden group transition-all"
+        >
+            {/* Top glass reflection highlight */}
+            <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-emerald-400/50 to-transparent" />
+
+            {/* Glowing LED status dot */}
+            <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_rgba(52,211,153,1)]" />
+            </span>
+
+            {/* Digital LED Digits */}
+            <div className="font-mono font-bold tracking-wider text-xs sm:text-sm text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.85)] flex items-center">
+                <span>{hours}</span>
+                <span className={`mx-0.5 transition-opacity duration-150 ${blink ? "opacity-100" : "opacity-30"}`}>:</span>
+                <span>{minutes}</span>
+                <span className={`mx-0.5 transition-opacity duration-150 ${blink ? "opacity-100" : "opacity-30"}`}>:</span>
+                <span className="text-emerald-300 drop-shadow-[0_0_10px_rgba(110,231,183,1)]">{seconds}</span>
+            </div>
+
+            {/* Timezone pill */}
+            <div className="border-l border-emerald-500/30 pl-2 ml-0.5 hidden md:flex flex-col justify-center">
+                <span className="text-[9px] font-mono font-semibold tracking-wider text-emerald-500/90 uppercase leading-none">
+                    {cleanTz}
+                </span>
+            </div>
         </div>
     );
 }
