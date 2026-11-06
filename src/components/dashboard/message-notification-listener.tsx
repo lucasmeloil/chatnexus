@@ -242,6 +242,14 @@ export function MessageNotificationListener() {
 
         if (!isTargetedToMe) return;
 
+        // Strict deduplication: prevent multiple events from stacking for the same transfer
+        const transferKey = `transfer-${rawJid}-${targetUserId || ''}`;
+        if (recentAlertsRef.current.has(transferKey)) return;
+        recentAlertsRef.current.add(transferKey);
+        setTimeout(() => {
+            recentAlertsRef.current.delete(transferKey);
+        }, 8000);
+
         // If notifications are disabled globally by user toggle, skip
         if (!isNotificationSoundEnabled()) return;
 
@@ -287,16 +295,23 @@ export function MessageNotificationListener() {
                 transferredBy: transferredByName,
                 departmentTag: departmentTag || undefined
             };
-            setAlerts(prev => [newAlert, ...prev.slice(0, 4)]);
+            // Never stack duplicate alerts for the same conversation
+            setAlerts(prev => [newAlert, ...prev.filter(a => !isSameChatJid(a.remoteJid, rawJid)).slice(0, 3)]);
+
+            // Auto-dismiss floating banner card after 8 seconds so it doesn't linger indefinitely
+            setTimeout(() => {
+                setAlerts(prev => prev.filter(a => a.id !== transferAlertId));
+            }, 8000);
         }
 
         // 4. Sonner interactive toast for immediate attention
         toast.info(`🔄 Atendimento Transferido para Você!`, {
             description: `${transferredByName} direcionou o cliente ${cleanPhone}${deptLabel}.`,
-            duration: 10000,
+            duration: 8000,
             action: {
                 label: "Atender Agora",
                 onClick: () => {
+                    setAlerts(prev => prev.filter(a => !isSameChatJid(a.remoteJid, rawJid)));
                     if (typeof window !== "undefined") {
                         window.dispatchEvent(new CustomEvent("nexus:open-chat", {
                             detail: { jid: rawJid, name: cleanPhone, selectTab: "meus" }
@@ -431,15 +446,9 @@ export function MessageNotificationListener() {
             }
         };
 
-        // Channel 4: Attendance transfer & update notifications
+        // Channel 4: Attendance transfer notifications
         const handleAttendanceTransfer = (payload: any) => {
             processTransfer(payload);
-        };
-
-        const handleAttendanceUpdate = (payload: any) => {
-            if (payload?.action === "transfer") {
-                processTransfer(payload);
-            }
         };
 
         // Channel 5: Internal team chat messages
@@ -451,7 +460,6 @@ export function MessageNotificationListener() {
         s.on("message.update", handleUpdate);
         s.on("message.upsert", handleUpsert);
         s.on("attendance.transfer", handleAttendanceTransfer);
-        s.on("attendance.update", handleAttendanceUpdate);
         s.on("internal_chat.message", handleInternalChat);
 
         return () => {
@@ -459,7 +467,6 @@ export function MessageNotificationListener() {
             s.off("message.update", handleUpdate);
             s.off("message.upsert", handleUpsert);
             s.off("attendance.transfer", handleAttendanceTransfer);
-            s.off("attendance.update", handleAttendanceUpdate);
             s.off("internal_chat.message", handleInternalChat);
         };
     }, [activeSocket, processIncoming, processTransfer, processInternalMessage, sessionId]);
@@ -513,6 +520,18 @@ export function MessageNotificationListener() {
         }
     }, [processIncoming, processTransfer, processInternalMessage, sessionId, currentUserId]);
 
+    // Automatically dismiss alerts when any chat conversation is opened
+    useEffect(() => {
+        const handleChatOpened = (e: any) => {
+            const jid = e.detail?.jid;
+            if (jid) {
+                setAlerts(prev => prev.filter(a => !isSameChatJid(a.remoteJid, jid)));
+            }
+        };
+        window.addEventListener("nexus:open-chat", handleChatOpened);
+        return () => window.removeEventListener("nexus:open-chat", handleChatOpened);
+    }, []);
+
     const handleDismiss = (id: string, e?: React.MouseEvent) => {
         if (e) e.stopPropagation();
         setAlerts(prev => prev.filter(a => a.id !== id));
@@ -528,6 +547,9 @@ export function MessageNotificationListener() {
 
         const targetJid = alert.remoteJid;
         const number = targetJid.split("@")[0];
+
+        // Clear all floating alerts belonging to this conversation
+        setAlerts(prev => prev.filter(a => !isSameChatJid(a.remoteJid, targetJid)));
 
         // 1. Dispatch custom event for immediate in-place selection if ChatLayoutClient is active
         if (typeof window !== "undefined") {

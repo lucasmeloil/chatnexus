@@ -126,6 +126,7 @@ export function SidebarNav() {
     // Track collapsed groups — all expanded by default
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
     const [internalUnread, setInternalUnread] = useState<number>(0);
+    const [liveChatBadge, setLiveChatBadge] = useState<number>(0);
 
     const toggleGroup = (label: string) => {
         setCollapsedGroups(prev => ({ ...prev, [label]: !prev[label] }));
@@ -151,9 +152,23 @@ export function SidebarNav() {
         }
     }, []);
 
+    // Consult live chat badge (waiting queue count)
+    const fetchLiveChatBadge = useCallback(async () => {
+        try {
+            const res = await fetch("/api/chat/live-badge");
+            const data = await res.json();
+            if (data?.status && typeof data.count === "number") {
+                setLiveChatBadge(data.count);
+            }
+        } catch (e) {
+            // silent
+        }
+    }, []);
+
     useEffect(() => {
         fetchUnread();
-    }, [fetchUnread]);
+        fetchLiveChatBadge();
+    }, [fetchUnread, fetchLiveChatBadge]);
 
     // When on internal-chat page, reset count & save last read timestamp
     useEffect(() => {
@@ -166,9 +181,22 @@ export function SidebarNav() {
         }
     }, [pathname]);
 
-    // Socket listener for new incoming internal chat messages
+    // Socket listener for new incoming internal chat messages & live chat updates
     useEffect(() => {
-        if (!activeSocket) return;
+        // Synchronize in-page updates from chat-list (waiting count)
+        const handleLiveChatCounts = (e: any) => {
+            if (typeof e.detail?.count === "number") {
+                setLiveChatBadge(e.detail.count);
+            }
+        };
+
+        window.addEventListener("nexus:live-chat-counts", handleLiveChatCounts);
+
+        if (!activeSocket) {
+            return () => {
+                window.removeEventListener("nexus:live-chat-counts", handleLiveChatCounts);
+            };
+        }
 
         const handleInternalMessage = (msg: any) => {
             // Ignore if sent by current user
@@ -190,14 +218,30 @@ export function SidebarNav() {
             setInternalUnread(0);
         };
 
+        // Live chat real-time events
+        const handleAttendanceEvent = () => {
+            fetchLiveChatBadge();
+        };
+
+        const handleIncomingMsg = () => {
+            fetchLiveChatBadge();
+        };
+
         activeSocket.on("internal_chat.message", handleInternalMessage);
+        activeSocket.on("attendance.update", handleAttendanceEvent);
+        activeSocket.on("attendance.transfer", handleAttendanceEvent);
+        activeSocket.on("incoming.message", handleIncomingMsg);
         window.addEventListener("nexus:internal-chat-read", handleLocalRead);
 
         return () => {
+            window.removeEventListener("nexus:live-chat-counts", handleLiveChatCounts);
             activeSocket.off("internal_chat.message", handleInternalMessage);
+            activeSocket.off("attendance.update", handleAttendanceEvent);
+            activeSocket.off("attendance.transfer", handleAttendanceEvent);
+            activeSocket.off("incoming.message", handleIncomingMsg);
             window.removeEventListener("nexus:internal-chat-read", handleLocalRead);
         };
-    }, [activeSocket, pathname, currentUserId]);
+    }, [activeSocket, pathname, currentUserId, fetchLiveChatBadge]);
 
     return (
         <TooltipProvider delayDuration={0}>
@@ -222,7 +266,13 @@ export function SidebarNav() {
                                         item={item}
                                         active={isActive(item.href)}
                                         isCollapsed={isCollapsed}
-                                        badge={item.href === "/dashboard/internal-chat" ? internalUnread : undefined}
+                                        badge={
+                                            item.href === "/dashboard/internal-chat"
+                                                ? internalUnread
+                                                : item.href === "/dashboard/chat"
+                                                ? liveChatBadge
+                                                : undefined
+                                        }
                                     />
                                 ))}
                             </div>
@@ -258,7 +308,13 @@ export function SidebarNav() {
                                             item={item}
                                             active={isActive(item.href)}
                                             isCollapsed={isCollapsed}
-                                            badge={item.href === "/dashboard/internal-chat" ? internalUnread : undefined}
+                                            badge={
+                                                item.href === "/dashboard/internal-chat"
+                                                    ? internalUnread
+                                                    : item.href === "/dashboard/chat"
+                                                    ? liveChatBadge
+                                                    : undefined
+                                            }
                                         />
                                     ))}
                                 </div>
@@ -273,6 +329,10 @@ export function SidebarNav() {
 
 function NavLink({ item, active, isCollapsed, badge }: { item: NavItem; active: boolean; isCollapsed: boolean; badge?: number }) {
     const Icon = item.icon;
+    const isLiveChat = item.href === "/dashboard/chat";
+    const badgeColorClass = isLiveChat ? "bg-blue-600 shadow-blue-500/30" : "bg-emerald-500 shadow-emerald-500/30";
+    const pingColorClass = isLiveChat ? "bg-blue-400" : "bg-emerald-400";
+    const dotColorClass = isLiveChat ? "bg-blue-500" : "bg-emerald-500";
 
     const linkContent = (
         <Link
@@ -300,8 +360,8 @@ function NavLink({ item, active, isCollapsed, badge }: { item: NavItem; active: 
                     />
                     {typeof badge === "number" && badge > 0 && (
                         <span className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5 items-center justify-center">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border-2 border-background" />
+                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${pingColorClass} opacity-75`} />
+                            <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${dotColorClass} border-2 border-background`} />
                         </span>
                     )}
                 </div>
@@ -313,7 +373,7 @@ function NavLink({ item, active, isCollapsed, badge }: { item: NavItem; active: 
                     />
                     <span className="truncate flex-1">{item.label}</span>
                     {typeof badge === "number" && badge > 0 && (
-                        <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-full bg-emerald-500 text-white shadow-sm shadow-emerald-500/30 animate-pulse shrink-0">
+                        <span className={`ml-auto inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-full ${badgeColorClass} text-white shadow-sm animate-pulse shrink-0`}>
                             <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
                             {badge > 99 ? "99+" : badge}
                         </span>
@@ -333,7 +393,7 @@ function NavLink({ item, active, isCollapsed, badge }: { item: NavItem; active: 
                     <div className="flex items-center gap-1.5 text-xs font-medium">
                         <span>{item.label}</span>
                         {typeof badge === "number" && badge > 0 && (
-                            <span className="px-1.5 py-0.2 bg-emerald-500 text-white font-bold rounded-full text-[10px]">
+                            <span className={`px-1.5 py-0.2 ${dotColorClass} text-white font-bold rounded-full text-[10px]`}>
                                 {badge}
                             </span>
                         )}

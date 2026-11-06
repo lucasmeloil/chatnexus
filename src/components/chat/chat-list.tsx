@@ -930,6 +930,15 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
         return chats.filter(c => !isBroadcast(c.jid) && isChatFinalized(c.jid, c.attendance)).length;
     }, [chats, isChatFinalized, isBroadcast]);
 
+    // Synchronize live chat badge with sidebar in real time
+    useEffect(() => {
+        if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("nexus:live-chat-counts", {
+                detail: { count: waitingCount }
+            }));
+        }
+    }, [waitingCount]);
+
     const handleAcceptChat = async (targetJid: string, e?: React.MouseEvent) => {
         if (e) e.stopPropagation();
         try {

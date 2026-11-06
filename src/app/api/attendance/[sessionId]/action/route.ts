@@ -67,16 +67,13 @@ export async function POST(
             };
 
             globalIo.emit("attendance.update", eventPayload);
-            globalIo.to(sessionId).emit("attendance.update", eventPayload);
 
             if (action === "transfer") {
                 globalIo.emit("attendance.transfer", eventPayload);
-                globalIo.to(sessionId).emit("attendance.transfer", eventPayload);
             }
 
             if (action === "reject") {
                 globalIo.emit("chat.deleted", { sessionId, jid });
-                globalIo.to(sessionId).emit("chat.deleted", { sessionId, jid });
             }
         }
 
