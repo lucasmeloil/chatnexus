@@ -8,6 +8,7 @@ import { ChevronDown, PanelLeftClose, PanelLeft } from "lucide-react";
 import {
     LayoutDashboard,
     MessageSquare,
+    MessagesSquare,
     Users,
     Settings,
     QrCode,
@@ -64,6 +65,7 @@ const navGroups: NavGroup[] = [
         label: "Mensagens",
         items: [
             { href: "/dashboard/chat", label: "Chat ao Vivo", icon: MessageSquare },
+            { href: "/dashboard/internal-chat", label: "Chat Interno", icon: MessagesSquare },
             { href: "/dashboard/quick-replies", label: "Respostas Rápidas", icon: Zap },
             { href: "/dashboard/broadcast", label: "Disparos / Broadcast", icon: Megaphone },
             { href: "/dashboard/sticker", label: "Criador de Figurinhas", icon: ImageIcon },
