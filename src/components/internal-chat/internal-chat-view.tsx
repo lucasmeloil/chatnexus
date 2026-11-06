@@ -524,3 +524,4 @@ export function InternalChatView() {
         </div>
     );
 }
+

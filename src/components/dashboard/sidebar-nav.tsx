@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { useSocket } from "@/components/chat/socket-context";
 import { ChevronDown, PanelLeftClose, PanelLeft } from "lucide-react";
 import {
     LayoutDashboard,
@@ -113,13 +114,18 @@ export function SidebarNav() {
     const pathname = usePathname();
     const { data: session } = useSession();
     const { isCollapsed, toggleCollapse } = useSidebar();
+    const { socket: socketFromCtx, getSocket } = useSocket();
+    const activeSocket = socketFromCtx || getSocket();
+
     // @ts-ignore
     const userRole = session?.user?.role;
     const userEmail = session?.user?.email?.toLowerCase();
     const isSuperAdmin = userRole === "SUPERADMIN" || userEmail === "admin@nexus.com" || userEmail === "lucasmeloil@pm.me";
+    const currentUserId = (session?.user as any)?.id;
 
     // Track collapsed groups — all expanded by default
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+    const [internalUnread, setInternalUnread] = useState<number>(0);
 
     const toggleGroup = (label: string) => {
         setCollapsedGroups(prev => ({ ...prev, [label]: !prev[label] }));
@@ -129,6 +135,69 @@ export function SidebarNav() {
         if (href === "/dashboard") return pathname === "/dashboard";
         return pathname.startsWith(href);
     };
+
+    // Consult unread internal chat messages count
+    const fetchUnread = useCallback(async () => {
+        try {
+            const lastRead = typeof window !== "undefined" ? localStorage.getItem("nexus_general_chat_last_read") : null;
+            const url = lastRead ? `/api/internal-chat/unread?since=${encodeURIComponent(lastRead)}` : `/api/internal-chat/unread`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data?.status && typeof data.unreadCount === "number") {
+                setInternalUnread(data.unreadCount);
+            }
+        } catch (e) {
+            // silent
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchUnread();
+    }, [fetchUnread]);
+
+    // When on internal-chat page, reset count & save last read timestamp
+    useEffect(() => {
+        if (pathname?.startsWith("/dashboard/internal-chat")) {
+            setInternalUnread(0);
+            if (typeof window !== "undefined") {
+                localStorage.setItem("nexus_general_chat_last_read", new Date().toISOString());
+                window.dispatchEvent(new CustomEvent("nexus:internal-chat-read"));
+            }
+        }
+    }, [pathname]);
+
+    // Socket listener for new incoming internal chat messages
+    useEffect(() => {
+        if (!activeSocket) return;
+
+        const handleInternalMessage = (msg: any) => {
+            // Ignore if sent by current user
+            if (msg?.senderId && currentUserId && msg.senderId === currentUserId) return;
+
+            // If user is already on internal-chat, don't increment badge
+            if (pathname?.startsWith("/dashboard/internal-chat")) {
+                if (typeof window !== "undefined") {
+                    localStorage.setItem("nexus_general_chat_last_read", new Date().toISOString());
+                }
+                return;
+            }
+
+            // Increment badge count
+            setInternalUnread(prev => prev + 1);
+        };
+
+        const handleLocalRead = () => {
+            setInternalUnread(0);
+        };
+
+        activeSocket.on("internal_chat.message", handleInternalMessage);
+        window.addEventListener("nexus:internal-chat-read", handleLocalRead);
+
+        return () => {
+            activeSocket.off("internal_chat.message", handleInternalMessage);
+            window.removeEventListener("nexus:internal-chat-read", handleLocalRead);
+        };
+    }, [activeSocket, pathname, currentUserId]);
 
     return (
         <TooltipProvider delayDuration={0}>
@@ -153,6 +222,7 @@ export function SidebarNav() {
                                         item={item}
                                         active={isActive(item.href)}
                                         isCollapsed={isCollapsed}
+                                        badge={item.href === "/dashboard/internal-chat" ? internalUnread : undefined}
                                     />
                                 ))}
                             </div>
@@ -188,6 +258,7 @@ export function SidebarNav() {
                                             item={item}
                                             active={isActive(item.href)}
                                             isCollapsed={isCollapsed}
+                                            badge={item.href === "/dashboard/internal-chat" ? internalUnread : undefined}
                                         />
                                     ))}
                                 </div>
@@ -200,7 +271,7 @@ export function SidebarNav() {
     );
 }
 
-function NavLink({ item, active, isCollapsed }: { item: NavItem; active: boolean; isCollapsed: boolean }) {
+function NavLink({ item, active, isCollapsed, badge }: { item: NavItem; active: boolean; isCollapsed: boolean; badge?: number }) {
     const Icon = item.icon;
 
     const linkContent = (
@@ -220,11 +291,35 @@ function NavLink({ item, active, isCollapsed }: { item: NavItem; active: boolean
             {active && !isCollapsed && (
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 bg-primary rounded-r-full" />
             )}
-            <Icon
-                size={isCollapsed ? 20 : 17}
-                className={`flex-shrink-0 transition-colors duration-200 ${active ? "text-primary" : "text-muted-foreground/70 group-hover:text-foreground"}`}
-            />
-            {!isCollapsed && <span className="truncate">{item.label}</span>}
+            
+            {isCollapsed ? (
+                <div className="relative flex items-center justify-center">
+                    <Icon
+                        size={20}
+                        className={`flex-shrink-0 transition-colors duration-200 ${active ? "text-primary" : "text-muted-foreground/70 group-hover:text-foreground"}`}
+                    />
+                    {typeof badge === "number" && badge > 0 && (
+                        <span className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5 items-center justify-center">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border-2 border-background" />
+                        </span>
+                    )}
+                </div>
+            ) : (
+                <>
+                    <Icon
+                        size={17}
+                        className={`flex-shrink-0 transition-colors duration-200 ${active ? "text-primary" : "text-muted-foreground/70 group-hover:text-foreground"}`}
+                    />
+                    <span className="truncate flex-1">{item.label}</span>
+                    {typeof badge === "number" && badge > 0 && (
+                        <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-full bg-emerald-500 text-white shadow-sm shadow-emerald-500/30 animate-pulse shrink-0">
+                            <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
+                            {badge > 99 ? "99+" : badge}
+                        </span>
+                    )}
+                </>
+            )}
         </Link>
     );
 
@@ -235,7 +330,14 @@ function NavLink({ item, active, isCollapsed }: { item: NavItem; active: boolean
                     {linkContent}
                 </TooltipTrigger>
                 <TooltipContent side="right" sideOffset={8}>
-                    <p className="text-xs font-medium">{item.label}</p>
+                    <div className="flex items-center gap-1.5 text-xs font-medium">
+                        <span>{item.label}</span>
+                        {typeof badge === "number" && badge > 0 && (
+                            <span className="px-1.5 py-0.2 bg-emerald-500 text-white font-bold rounded-full text-[10px]">
+                                {badge}
+                            </span>
+                        )}
+                    </div>
                 </TooltipContent>
             </Tooltip>
         );

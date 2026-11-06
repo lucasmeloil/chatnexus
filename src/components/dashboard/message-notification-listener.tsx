@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { MessageSquare, X, ArrowRight, BellRing, Volume2, ArrowRightLeft, UserCheck } from "lucide-react";
+import { MessageSquare, X, ArrowRight, BellRing, Volume2, ArrowRightLeft, UserCheck, MessagesSquare } from "lucide-react";
 import { useSocket } from "@/components/chat/socket-context";
 import { useSession } from "@/components/dashboard/session-provider";
 import { useSession as useAuthSession } from "next-auth/react";
@@ -32,6 +32,8 @@ interface FloatingAlert {
     isTransfer?: boolean;
     transferredBy?: string;
     departmentTag?: string;
+    isInternalChat?: boolean;
+    senderRole?: string;
 }
 
 interface IncomingMessagePayload {
@@ -310,6 +312,74 @@ export function MessageNotificationListener() {
         });
     }, [currentUserId, isSuperAdmin, router, sessionId]);
 
+    // Process incoming internal chat message from team members or admin
+    const processInternalMessage = useCallback((msg: any) => {
+        if (!msg) return;
+        const senderId = msg.senderId;
+        // Skip messages sent by oneself
+        if (senderId && currentUserId && senderId === currentUserId) return;
+
+        // If user is currently in internal-chat tab with document in focus, avoid duplicate popups
+        if (typeof window !== "undefined" && window.location.pathname.startsWith("/dashboard/internal-chat") && document.hasFocus()) {
+            return;
+        }
+
+        // If sound/notifications are disabled globally, exit
+        if (!isNotificationSoundEnabled()) return;
+
+        const senderName = msg.senderName || "Membro da Equipe";
+        const roleLabel = msg.senderRole === "SUPERADMIN" ? "Administrador" : "Atendente";
+        const contentText = msg.content || "Nova mensagem no chat interno";
+        const internalAlertId = `internal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+        // 1. Play sound chime
+        playNotificationSound();
+
+        // 2. Native OS/Browser notification
+        sendBrowserNotification(
+            `💬 ${senderName} no Chat Interno`,
+            {
+                body: contentText,
+                tag: `internal-${msg.id || Date.now()}`,
+            },
+            () => {
+                router.push("/dashboard/internal-chat");
+            }
+        );
+
+        // 3. Floating alert banner if enabled
+        if (isFloatingNotificationEnabled()) {
+            const newAlert: FloatingAlert = {
+                id: internalAlertId,
+                sessionId: sessionId || "",
+                remoteJid: "internal-chat",
+                senderTitle: senderName,
+                cleanPhone: roleLabel,
+                displayBody: contentText,
+                timestamp: new Date(),
+                isInternalChat: true,
+                senderRole: msg.senderRole
+            };
+            setAlerts(prev => [newAlert, ...prev.slice(0, 4)]);
+
+            setTimeout(() => {
+                setAlerts(prev => prev.filter(a => a.id !== internalAlertId));
+            }, 9000);
+        }
+
+        // 4. Sonner interactive toast
+        toast.info(`💬 Mensagem no Chat Interno: ${senderName}`, {
+            description: contentText.length > 75 ? contentText.substring(0, 75) + "..." : contentText,
+            duration: 8000,
+            action: {
+                label: "Abrir Chat",
+                onClick: () => {
+                    router.push("/dashboard/internal-chat");
+                }
+            }
+        });
+    }, [currentUserId, router, sessionId]);
+
     // Attach listeners across all message and attendance channels
     useEffect(() => {
         const s = activeSocket;
@@ -372,11 +442,17 @@ export function MessageNotificationListener() {
             }
         };
 
+        // Channel 5: Internal team chat messages
+        const handleInternalChat = (payload: any) => {
+            processInternalMessage(payload);
+        };
+
         s.on("incoming.message", handleIncoming);
         s.on("message.update", handleUpdate);
         s.on("message.upsert", handleUpsert);
         s.on("attendance.transfer", handleAttendanceTransfer);
         s.on("attendance.update", handleAttendanceUpdate);
+        s.on("internal_chat.message", handleInternalChat);
 
         return () => {
             s.off("incoming.message", handleIncoming);
@@ -384,8 +460,9 @@ export function MessageNotificationListener() {
             s.off("message.upsert", handleUpsert);
             s.off("attendance.transfer", handleAttendanceTransfer);
             s.off("attendance.update", handleAttendanceUpdate);
+            s.off("internal_chat.message", handleInternalChat);
         };
-    }, [activeSocket, processIncoming, processTransfer, sessionId]);
+    }, [activeSocket, processIncoming, processTransfer, processInternalMessage, sessionId]);
 
     // Global test function for debugging
     useEffect(() => {
@@ -421,8 +498,20 @@ export function MessageNotificationListener() {
                     }
                 });
             };
+
+            (window as any).__nexusTestInternalChat = (senderName = "Super Admin", content = "Olá equipe! Nova mensagem no Chat Interno 🚀") => {
+                unlockAudioSystem();
+                processInternalMessage({
+                    id: `test-internal-${Date.now()}`,
+                    senderId: "other-user-test",
+                    senderName: senderName,
+                    senderRole: "SUPERADMIN",
+                    content: content,
+                    createdAt: new Date().toISOString()
+                });
+            };
         }
-    }, [processIncoming, processTransfer, sessionId, currentUserId]);
+    }, [processIncoming, processTransfer, processInternalMessage, sessionId, currentUserId]);
 
     const handleDismiss = (id: string, e?: React.MouseEvent) => {
         if (e) e.stopPropagation();
@@ -431,6 +520,12 @@ export function MessageNotificationListener() {
 
     const handleOpenChat = (alert: FloatingAlert) => {
         handleDismiss(alert.id);
+
+        if (alert.isInternalChat) {
+            router.push("/dashboard/internal-chat");
+            return;
+        }
+
         const targetJid = alert.remoteJid;
         const number = targetJid.split("@")[0];
 
@@ -460,13 +555,17 @@ export function MessageNotificationListener() {
                     key={alert.id}
                     onClick={() => handleOpenChat(alert)}
                     className={
-                        alert.isTransfer
+                        alert.isInternalChat
+                            ? "pointer-events-auto cursor-pointer group bg-background/95 backdrop-blur-xl border-2 border-emerald-500/80 shadow-2xl rounded-2xl p-4 transition-all duration-300 hover:scale-[1.02] hover:border-emerald-500 relative overflow-hidden animate-in slide-in-from-top-4 fade-in ring-2 ring-emerald-500/20"
+                            : alert.isTransfer
                             ? "pointer-events-auto cursor-pointer group bg-background/95 backdrop-blur-xl border-2 border-purple-500/80 shadow-2xl rounded-2xl p-4 transition-all duration-300 hover:scale-[1.02] hover:border-purple-500 relative overflow-hidden animate-in slide-in-from-top-4 fade-in ring-2 ring-purple-500/20"
                             : "pointer-events-auto cursor-pointer group bg-background/95 backdrop-blur-xl border-2 border-blue-500/50 shadow-2xl rounded-2xl p-4 transition-all duration-300 hover:scale-[1.02] hover:border-blue-500 relative overflow-hidden animate-in slide-in-from-top-4 fade-in"
                     }
                 >
                     {/* Top highlight animated gradient bar */}
-                    {alert.isTransfer ? (
+                    {alert.isInternalChat ? (
+                        <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-green-500 animate-pulse" />
+                    ) : alert.isTransfer ? (
                         <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-purple-600 via-pink-500 to-indigo-500 animate-pulse" />
                     ) : (
                         <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-blue-600 via-cyan-500 to-sky-400" />
@@ -474,7 +573,13 @@ export function MessageNotificationListener() {
 
                     <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-2.5 min-w-0">
-                            {alert.isTransfer ? (
+                            {alert.isInternalChat ? (
+                                <div className="h-10 w-10 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0 text-emerald-600 dark:text-emerald-400 relative">
+                                    <MessagesSquare className="h-5 w-5" />
+                                    <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-emerald-500 rounded-full animate-ping" />
+                                    <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-emerald-500 rounded-full" />
+                                </div>
+                            ) : alert.isTransfer ? (
                                 <div className="h-10 w-10 rounded-full bg-purple-500/15 border border-purple-500/30 flex items-center justify-center shrink-0 text-purple-600 dark:text-purple-400 relative">
                                     <ArrowRightLeft className="h-5 w-5" />
                                     <span className="absolute -top-0.5 -right-0.5 h-3 w-3 bg-purple-500 rounded-full animate-ping" />
@@ -494,7 +599,11 @@ export function MessageNotificationListener() {
                                         {alert.senderTitle}
                                     </span>
                                 </div>
-                                {alert.isTransfer ? (
+                                {alert.isInternalChat ? (
+                                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                        <MessagesSquare className="h-3 w-3 inline animate-pulse" /> Chat Interno da Equipe
+                                    </span>
+                                ) : alert.isTransfer ? (
                                     <span className="text-[11px] text-purple-600 dark:text-purple-400 font-bold flex items-center gap-1">
                                         <ArrowRightLeft className="h-3 w-3 inline animate-pulse" /> Atendimento Transferido
                                     </span>
@@ -516,7 +625,9 @@ export function MessageNotificationListener() {
                     </div>
 
                     <div className={
-                        alert.isTransfer
+                        alert.isInternalChat
+                            ? "mt-2.5 text-xs text-foreground/90 bg-emerald-500/10 dark:bg-emerald-950/20 p-2.5 rounded-xl line-clamp-2 border border-emerald-500/20 font-medium"
+                            : alert.isTransfer
                             ? "mt-2.5 text-xs text-foreground/90 bg-purple-500/10 dark:bg-purple-950/20 p-2.5 rounded-xl line-clamp-2 border border-purple-500/20 font-medium"
                             : "mt-2.5 text-xs text-foreground/90 bg-muted/40 p-2.5 rounded-xl line-clamp-2 border border-border/40 font-medium"
                     }>
@@ -528,7 +639,20 @@ export function MessageNotificationListener() {
                             {alert.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </span>
 
-                        {alert.isTransfer ? (
+                        {alert.isInternalChat ? (
+                            <Button
+                                size="sm"
+                                variant="default"
+                                className="h-7 px-3 text-xs gap-1.5 font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-md"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenChat(alert);
+                                }}
+                            >
+                                <span>Abrir Chat Interno</span>
+                                <ArrowRight className="h-3.5 w-3.5" />
+                            </Button>
+                        ) : alert.isTransfer ? (
                             <Button
                                 size="sm"
                                 variant="default"

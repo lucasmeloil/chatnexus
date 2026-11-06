@@ -161,6 +161,33 @@ export class InternalChatService {
         }
     }
 
+    static async getUnreadCount(currentUserId: string, sinceDate?: Date | null): Promise<number> {
+        await this.ensureTables();
+        try {
+            const directRows = await prisma.$queryRawUnsafe<any[]>(`
+                SELECT COUNT(*) as cnt
+                FROM \`InternalChatMessage\`
+                WHERE receiverId = ? AND isRead = 0
+            `, currentUserId);
+            const directCount = Number(directRows[0]?.cnt || 0);
+
+            let channelCount = 0;
+            if (sinceDate && !isNaN(sinceDate.getTime())) {
+                const channelRows = await prisma.$queryRawUnsafe<any[]>(`
+                    SELECT COUNT(*) as cnt
+                    FROM \`InternalChatMessage\`
+                    WHERE channel = 'general' AND senderId != ? AND createdAt > ?
+                `, currentUserId, sinceDate);
+                channelCount = Number(channelRows[0]?.cnt || 0);
+            }
+
+            return directCount + channelCount;
+        } catch (e) {
+            logger.error("InternalChat", "Error getting total unread", e);
+            return 0;
+        }
+    }
+
     static async getUnreadCounts(currentUserId: string): Promise<Record<string, number>> {
         await this.ensureTables();
         try {
@@ -202,3 +229,4 @@ export class InternalChatService {
         }
     }
 }
+
