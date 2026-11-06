@@ -61,7 +61,7 @@ export function MessageNotificationListener() {
     const currentUserId = authSession?.user?.id;
     const currentUserRole = (authSession?.user as any)?.role;
     const currentUserEmail = authSession?.user?.email?.toLowerCase();
-    const isSuperAdmin = currentUserRole === "SUPERADMIN" || currentUserEmail === "admin@nexus.com" || currentUserEmail === "lucasmeloil@pm.me";
+    const isSuperAdmin = currentUserRole === "SUPERADMIN";
 
     const activeSocket = socketFromCtx || getSocket();
 

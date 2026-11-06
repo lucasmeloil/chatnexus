@@ -431,9 +431,7 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
 
     const currentUserId = authSession?.user?.id;
     const currentUserRole = (authSession?.user as any)?.role;
-    const isSuperAdmin = currentUserRole === "SUPERADMIN" || 
-        authSession?.user?.email?.toLowerCase() === "lucasmeloil@pm.me" ||
-        authSession?.user?.email?.toLowerCase() === "admin@nexus.com";
+    const isSuperAdmin = currentUserRole === "SUPERADMIN";
 
     // Privacy security rule: if another attendant accepted this chat, regular attendants cannot view or type!
     const isLockedForMe = Boolean(

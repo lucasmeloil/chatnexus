@@ -120,7 +120,7 @@ export function SidebarNav() {
     // @ts-ignore
     const userRole = session?.user?.role;
     const userEmail = session?.user?.email?.toLowerCase();
-    const isSuperAdmin = userRole === "SUPERADMIN" || userEmail === "admin@nexus.com" || userEmail === "lucasmeloil@pm.me";
+    const isSuperAdmin = userRole === "SUPERADMIN";
     const currentUserId = (session?.user as any)?.id;
 
     // Track collapsed groups — all expanded by default

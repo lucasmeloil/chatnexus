@@ -454,9 +454,7 @@ export function ChatList({ sessionId, onSelectChat, selectedJid }: ChatListProps
     const { data: authSession } = useSession();
     const currentUserId = authSession?.user?.id;
     const currentUserRole = (authSession?.user as any)?.role;
-    const isSuperAdmin = currentUserRole === "SUPERADMIN" || 
-        authSession?.user?.email?.toLowerCase() === "lucasmeloil@pm.me" ||
-        authSession?.user?.email?.toLowerCase() === "admin@nexus.com";
+    const isSuperAdmin = currentUserRole === "SUPERADMIN";
 
     const [chats, setChats] = useState<ChatContact[]>([]);
     const [loading, setLoading] = useState(true);
