@@ -19,7 +19,6 @@ import {
 } from "@/lib/notification-sound";
 import { isSameChatJid } from "@/lib/jid-utils";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
 
 interface FloatingAlert {
     id: string;
@@ -281,7 +280,7 @@ export function MessageNotificationListener() {
             }
         );
 
-        // 3. Add to visual floating alert card if floating notifications are enabled
+        // 3. Add to visual floating alert card if floating notifications are enabled (Single Elegant Purple Card)
         if (isFloatingNotificationEnabled()) {
             const newAlert: FloatingAlert = {
                 id: transferAlertId,
@@ -303,28 +302,6 @@ export function MessageNotificationListener() {
                 setAlerts(prev => prev.filter(a => a.id !== transferAlertId));
             }, 8000);
         }
-
-        // 4. Sonner interactive toast for immediate attention
-        toast.info(`🔄 Atendimento Transferido para Você!`, {
-            description: `${transferredByName} direcionou o cliente ${cleanPhone}${deptLabel}.`,
-            duration: 8000,
-            action: {
-                label: "Atender Agora",
-                onClick: () => {
-                    setAlerts(prev => prev.filter(a => !isSameChatJid(a.remoteJid, rawJid)));
-                    if (typeof window !== "undefined") {
-                        window.dispatchEvent(new CustomEvent("nexus:open-chat", {
-                            detail: { jid: rawJid, name: cleanPhone, selectTab: "meus" }
-                        }));
-                    }
-                    const number = rawJid.split("@")[0];
-                    const cleanPath = rawJid.includes("@g.us")
-                        ? `/dashboard/chat/${encodeURIComponent(rawJid)}`
-                        : `/dashboard/chat/${encodeURIComponent(number)}`;
-                    router.push(cleanPath);
-                }
-            }
-        });
     }, [currentUserId, isSuperAdmin, router, sessionId]);
 
     // Process incoming internal chat message from team members or admin
@@ -339,12 +316,20 @@ export function MessageNotificationListener() {
             return;
         }
 
+        // Deduplicate internal chat message notifications
+        const contentText = msg.content || "Nova mensagem no chat interno";
+        const internalKey = `internal-${msg.id || `${senderId}_${contentText}`}`;
+        if (recentAlertsRef.current.has(internalKey)) return;
+        recentAlertsRef.current.add(internalKey);
+        setTimeout(() => {
+            recentAlertsRef.current.delete(internalKey);
+        }, 8000);
+
         // If sound/notifications are disabled globally, exit
         if (!isNotificationSoundEnabled()) return;
 
         const senderName = msg.senderName || "Membro da Equipe";
         const roleLabel = msg.senderRole === "SUPERADMIN" ? "Administrador" : "Atendente";
-        const contentText = msg.content || "Nova mensagem no chat interno";
         const internalAlertId = `internal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
         // 1. Play sound chime
@@ -362,7 +347,7 @@ export function MessageNotificationListener() {
             }
         );
 
-        // 3. Floating alert banner if enabled
+        // 3. Floating alert banner if enabled (Single Elegant Green Card)
         if (isFloatingNotificationEnabled()) {
             const newAlert: FloatingAlert = {
                 id: internalAlertId,
@@ -375,24 +360,12 @@ export function MessageNotificationListener() {
                 isInternalChat: true,
                 senderRole: msg.senderRole
             };
-            setAlerts(prev => [newAlert, ...prev.slice(0, 4)]);
+            setAlerts(prev => [newAlert, ...prev.filter(a => a.id !== internalAlertId && a.remoteJid !== "internal-chat").slice(0, 3)]);
 
             setTimeout(() => {
                 setAlerts(prev => prev.filter(a => a.id !== internalAlertId));
-            }, 9000);
+            }, 8000);
         }
-
-        // 4. Sonner interactive toast
-        toast.info(`💬 Mensagem no Chat Interno: ${senderName}`, {
-            description: contentText.length > 75 ? contentText.substring(0, 75) + "..." : contentText,
-            duration: 8000,
-            action: {
-                label: "Abrir Chat",
-                onClick: () => {
-                    router.push("/dashboard/internal-chat");
-                }
-            }
-        });
     }, [currentUserId, router, sessionId]);
 
     // Attach listeners across all message and attendance channels
