@@ -14,7 +14,8 @@ import {
     ExternalLink, 
     User,
     Sparkles,
-    ShieldCheck
+    ShieldCheck,
+    CheckCircle2
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,8 @@ export function CallDialog({
     const [callDuration, setCallDuration] = useState(0);
     const [isMuted, setIsMuted] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [endedBy, setEndedBy] = useState<"client" | "agent" | null>(null);
+    const [endMessage, setEndMessage] = useState<string | null>(null);
 
     const socketRef = useRef<Socket | null>(null);
     const peerRef = useRef<RTCPeerConnection | null>(null);
@@ -98,6 +101,8 @@ export function CallDialog({
             setCallDuration(0);
             setRoomId(null);
             setCallUrl(null);
+            setEndedBy(null);
+            setEndMessage(null);
             return;
         }
 
@@ -222,14 +227,22 @@ export function CallDialog({
                     }
                 });
 
-                socket.on("call:ended", () => {
+                socket.on("call:ended", (data?: { by?: string; reason?: string }) => {
+                    const isClient = data?.by !== "agent";
+                    setEndedBy(isClient ? "client" : "agent");
+                    const reason = data?.reason || (isClient ? "O cliente encerrou a chamada" : "Chamada finalizada");
+                    setEndMessage(reason);
                     setStatus("ended");
-                    toast.info("Cliente encerrou a chamada");
+                    if (isClient) {
+                        toast.warning("🔔 Atendimento Finalizado: O cliente encerrou a ligação.", { duration: 6000 });
+                    }
                 });
 
                 socket.on("call:peer-left", () => {
+                    setEndedBy("client");
+                    setEndMessage("O cliente encerrou ou desconectou da chamada");
                     setStatus("ended");
-                    toast.info("Cliente desconectou");
+                    toast.warning("🔔 O cliente encerrou a ligação ou fechou a aba.", { duration: 6000 });
                 });
 
             } catch (err: any) {
@@ -272,11 +285,18 @@ export function CallDialog({
     };
 
     const handleEndCall = () => {
+        if (socketRef.current && roomId) {
+            socketRef.current.emit("call:end", { 
+                roomId, 
+                reason: "Atendimento finalizado pelo atendente", 
+                by: "agent" 
+            });
+        }
         cleanupCall();
+        setEndedBy("agent");
+        setEndMessage("Atendimento finalizado por você");
         setStatus("ended");
-        setTimeout(() => {
-            onOpenChange(false);
-        }, 1200);
+        toast.info("Atendimento de voz finalizado com sucesso.");
     };
 
     return (
@@ -299,9 +319,13 @@ export function CallDialog({
                     {/* Animated Avatar */}
                     <div className="relative">
                         <div className={`w-24 h-24 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 ${
-                            status === "connected"
-                                ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white"
-                                : "bg-gradient-to-br from-primary to-blue-600 text-white"
+                            status === "ended"
+                                ? endedBy === "client"
+                                    ? "bg-amber-500/20 border-2 border-amber-500/40 text-amber-500"
+                                    : "bg-emerald-500/20 border-2 border-emerald-500/40 text-emerald-500"
+                                : status === "connected"
+                                    ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white"
+                                    : "bg-gradient-to-br from-primary to-blue-600 text-white"
                         }`}>
                             {status === "calling" && (
                                 <span className="absolute inset-0 rounded-full border-2 border-primary animate-ping opacity-75" />
@@ -309,12 +333,20 @@ export function CallDialog({
                             {status === "connected" && (
                                 <span className="absolute inset-0 rounded-full border-2 border-emerald-400 animate-pulse opacity-75" />
                             )}
-                            <User className="h-10 w-10" />
+                            {status === "ended" ? (
+                                endedBy === "client" ? (
+                                    <PhoneOff className="h-9 w-9 text-amber-500" />
+                                ) : (
+                                    <CheckCircle2 className="h-10 w-10 text-emerald-500" />
+                                )
+                            ) : (
+                                <User className="h-10 w-10" />
+                            )}
                         </div>
                     </div>
 
                     {/* Contact Details & Status */}
-                    <div className="space-y-1">
+                    <div className="space-y-1.5 w-full">
                         <h3 className="font-bold text-base text-foreground">{contactName}</h3>
                         
                         {status === "initiating" && (
@@ -329,7 +361,7 @@ export function CallDialog({
                                 <p className="text-xs text-primary font-semibold animate-pulse">
                                     Chamando cliente no WhatsApp...
                                 </p>
-                                <p className="text-[11px] text-muted-foreground max-w-xs">
+                                <p className="text-[11px] text-muted-foreground max-w-xs mx-auto">
                                     O convite foi enviado na conversa. A chamada iniciará assim que o cliente tocar no link.
                                 </p>
                             </div>
@@ -348,9 +380,32 @@ export function CallDialog({
                         )}
 
                         {status === "ended" && (
-                            <p className="text-xs text-muted-foreground font-medium">
-                                Chamada finalizada • Duração: {formatTimer(callDuration)}
-                            </p>
+                            <div className="space-y-3 pt-1">
+                                {endedBy === "client" ? (
+                                    <div className="w-full p-3.5 rounded-xl border bg-amber-500/10 border-amber-500/30 text-left flex items-start gap-3 animate-in fade-in">
+                                        <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
+                                            <PhoneOff className="h-4 w-4" />
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            <h4 className="text-xs font-bold text-foreground">Chamada Finalizada pelo Cliente</h4>
+                                            <p className="text-[11px] text-muted-foreground">{endMessage || "O cliente encerrou a ligação de voz."}</p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="w-full p-3.5 rounded-xl border bg-emerald-500/10 border-emerald-500/30 text-left flex items-start gap-3 animate-in fade-in">
+                                        <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 shrink-0">
+                                            <CheckCircle2 className="h-4 w-4" />
+                                        </div>
+                                        <div className="space-y-0.5">
+                                            <h4 className="text-xs font-bold text-foreground">Atendimento Finalizado com Sucesso</h4>
+                                            <p className="text-[11px] text-muted-foreground">Você concluiu esta ligação de voz com o cliente.</p>
+                                        </div>
+                                    </div>
+                                )}
+                                <p className="text-xs text-muted-foreground font-medium">
+                                    Duração total: <strong className="text-foreground font-mono">{formatTimer(callDuration)}</strong>
+                                </p>
+                            </div>
                         )}
                     </div>
 
@@ -374,32 +429,46 @@ export function CallDialog({
 
                     {/* Controls */}
                     <div className="flex items-center justify-center gap-4 pt-2">
-                        {status === "connected" && (
+                        {status === "ended" ? (
                             <Button
                                 type="button"
-                                size="icon"
-                                variant="outline"
-                                onClick={toggleMute}
-                                className={`h-12 w-12 rounded-full cursor-pointer transition-all ${
-                                    isMuted 
-                                        ? "bg-amber-500/10 border-amber-500/40 text-amber-600 dark:text-amber-400" 
-                                        : "hover:bg-muted"
-                                }`}
-                                title={isMuted ? "Desmutar microfone" : "Silenciar microfone"}
+                                size="lg"
+                                onClick={() => onOpenChange(false)}
+                                className="h-11 px-8 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground font-semibold gap-2 shadow cursor-pointer transition-transform hover:scale-105 active:scale-95"
                             >
-                                {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                                <Check className="h-4 w-4" />
+                                <span>Concluir e Fechar</span>
                             </Button>
-                        )}
+                        ) : (
+                            <>
+                                {status === "connected" && (
+                                    <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="outline"
+                                        onClick={toggleMute}
+                                        className={`h-12 w-12 rounded-full cursor-pointer transition-all ${
+                                            isMuted 
+                                                ? "bg-amber-500/10 border-amber-500/40 text-amber-600 dark:text-amber-400" 
+                                                : "hover:bg-muted"
+                                        }`}
+                                        title={isMuted ? "Desmutar microfone" : "Silenciar microfone"}
+                                    >
+                                        {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                                    </Button>
+                                )}
 
-                        <Button
-                            type="button"
-                            size="lg"
-                            onClick={handleEndCall}
-                            className="h-12 px-6 rounded-full bg-red-600 hover:bg-red-700 text-white font-semibold gap-2 shadow-lg shadow-red-600/30 cursor-pointer transition-transform hover:scale-105 active:scale-95"
-                        >
-                            <PhoneOff className="h-5 w-5" />
-                            <span>{status === "connected" ? "Desligar" : "Cancelar Chamada"}</span>
-                        </Button>
+                                <Button
+                                    type="button"
+                                    size="lg"
+                                    onClick={handleEndCall}
+                                    className="h-12 px-6 rounded-full bg-red-600 hover:bg-red-700 text-white font-semibold gap-2 shadow-lg shadow-red-600/30 cursor-pointer transition-transform hover:scale-105 active:scale-95"
+                                >
+                                    <PhoneOff className="h-5 w-5" />
+                                    <span>{status === "connected" ? "Desligar" : "Cancelar Chamada"}</span>
+                                </Button>
+                            </>
+                        )}
                     </div>
                 </div>
             </DialogContent>

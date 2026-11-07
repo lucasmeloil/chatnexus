@@ -5,12 +5,22 @@ export function setupSocket(io: Server) {
   io.on("connection", (socket) => {
     logger.info("Socket", "Client connected:", socket.id);
 
-    // Track active call rooms for clean disconnection
+    // Track active call rooms and role for clean disconnection
     const callRooms = new Set<string>();
+    let socketCallRole: "agent" | "client" | null = null;
+    let socketCallName: string | null = null;
 
     socket.on("disconnect", () => {
       logger.info("Socket", "Client disconnected:", socket.id);
       for (const roomId of callRooms) {
+        const defaultReason = socketCallRole === "agent" 
+          ? "Atendimento finalizado pelo atendente" 
+          : "Chamada finalizada pelo cliente";
+        socket.to(`call:${roomId}`).emit("call:ended", {
+          bySocketId: socket.id,
+          by: socketCallRole || "client",
+          reason: defaultReason
+        });
         socket.to(`call:${roomId}`).emit("call:peer-left", { socketId: socket.id });
       }
       callRooms.clear();
@@ -32,6 +42,8 @@ export function setupSocket(io: Server) {
     socket.on("call:join", (data: { roomId: string; role: "agent" | "client"; name?: string }) => {
         const { roomId, role, name } = data || {};
         if (!roomId) return;
+        socketCallRole = role;
+        socketCallName = name || null;
         const roomKey = `call:${roomId}`;
         socket.join(roomKey);
         callRooms.add(roomId);
@@ -63,13 +75,15 @@ export function setupSocket(io: Server) {
         }
     });
 
-    socket.on("call:end", (data: { roomId: string; reason?: string }) => {
-        const { roomId, reason } = data || {};
+    socket.on("call:end", (data: { roomId: string; reason?: string; by?: "agent" | "client" }) => {
+        const { roomId, reason, by } = data || {};
         if (!roomId) return;
         const roomKey = `call:${roomId}`;
+        const senderRole = by || socketCallRole || "client";
         socket.to(roomKey).emit("call:ended", {
             bySocketId: socket.id,
-            reason: reason || "Chamada finalizada"
+            by: senderRole,
+            reason: reason || (senderRole === "agent" ? "Atendimento finalizado pelo atendente" : "Chamada finalizada pelo cliente")
         });
         socket.leave(roomKey);
         callRooms.delete(roomId);

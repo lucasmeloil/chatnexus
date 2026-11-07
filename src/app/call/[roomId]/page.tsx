@@ -35,6 +35,8 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
     const [isMuted, setIsMuted] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [peerName, setPeerName] = useState<string>("Atendente Nexus");
+    const [endedBy, setEndedBy] = useState<"agent" | "client" | null>(null);
+    const [endReason, setEndReason] = useState<string>("Chamada finalizada");
 
     const socketRef = useRef<Socket | null>(null);
     const peerRef = useRef<RTCPeerConnection | null>(null);
@@ -170,12 +172,14 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                 }
             });
 
-            socket.on("call:ended", () => {
-                handleEndCall("Chamada encerrada pelo atendente");
+            socket.on("call:ended", (data?: { by?: "agent" | "client"; reason?: string }) => {
+                const by = data?.by === "agent" ? "agent" : "client";
+                const reason = data?.reason || "Atendimento finalizado pelo atendente";
+                handleEndCall(reason, by, false);
             });
 
             socket.on("call:peer-left", () => {
-                handleEndCall("Atendente desconectou da chamada");
+                handleEndCall("Atendimento finalizado pelo atendente", "agent", false);
             });
 
         } catch (err: any) {
@@ -195,7 +199,7 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
         }
     };
 
-    const handleEndCall = (reason = "Chamada finalizada") => {
+    const handleEndCall = (reason = "Chamada finalizada", by: "agent" | "client" = "client", emitSocket = true) => {
         if (timerRef.current) clearInterval(timerRef.current);
         if (localStreamRef.current) {
             localStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -205,10 +209,14 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
             peerRef.current = null;
         }
         if (socketRef.current) {
-            socketRef.current.emit("call:end", { roomId, reason });
+            if (emitSocket) {
+                socketRef.current.emit("call:end", { roomId, reason, by });
+            }
             socketRef.current.disconnect();
             socketRef.current = null;
         }
+        setEndedBy(by);
+        setEndReason(reason);
         setStatus("ended");
     };
 
@@ -238,9 +246,42 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
 
             {/* Center Content */}
             <main className="w-full max-w-sm flex flex-col items-center justify-center my-auto z-10 text-center space-y-6">
+                {/* End of Call Alert Banner */}
+                {status === "ended" && (
+                    <div className={`w-full p-4 rounded-2xl border shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-500 text-left ${
+                        endedBy === "agent" 
+                            ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-100" 
+                            : "bg-slate-800/80 border-white/15 text-slate-200"
+                    }`}>
+                        <div className="flex items-start gap-3">
+                            <div className={`p-2 rounded-xl shrink-0 ${
+                                endedBy === "agent" ? "bg-emerald-500/25 text-emerald-400" : "bg-white/10 text-slate-300"
+                            }`}>
+                                {endedBy === "agent" ? <CheckCircle2 className="h-6 w-6" /> : <PhoneOff className="h-6 w-6" />}
+                            </div>
+                            <div className="space-y-0.5">
+                                <h3 className="text-sm font-bold tracking-tight text-white">
+                                    {endedBy === "agent" ? "Atendimento Finalizado pelo Atendente" : "Chamada Finalizada por Você"}
+                                </h3>
+                                <p className="text-xs text-slate-300 leading-relaxed">
+                                    {endedBy === "agent" 
+                                        ? `O atendente ${peerName} encerrou esta ligação de voz.`
+                                        : "Esta chamada de voz foi encerrada por você."}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Caller Avatar */}
                 <div className="relative">
-                    <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 p-1 flex items-center justify-center shadow-2xl relative">
+                    <div className={`w-28 h-28 sm:w-32 sm:h-32 rounded-full p-1 flex items-center justify-center shadow-2xl relative transition-all duration-300 ${
+                        status === "ended"
+                            ? endedBy === "agent"
+                                ? "bg-gradient-to-br from-emerald-500 to-teal-700"
+                                : "bg-gradient-to-br from-slate-700 to-slate-800"
+                            : "bg-gradient-to-br from-blue-600 to-indigo-700"
+                    }`}>
                         {status === "connected" && (
                             <span className="absolute inset-0 rounded-full border-2 border-emerald-400 animate-ping opacity-75" />
                         )}
@@ -248,7 +289,15 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                             <span className="absolute inset-0 rounded-full border-2 border-blue-400 animate-pulse opacity-75" />
                         )}
                         <div className="w-full h-full rounded-full bg-slate-900 flex items-center justify-center text-3xl font-extrabold text-blue-400 border border-white/10">
-                            {peerName ? peerName[0]?.toUpperCase() : "A"}
+                            {status === "ended" ? (
+                                endedBy === "agent" ? (
+                                    <CheckCircle2 className="h-12 w-12 text-emerald-400" />
+                                ) : (
+                                    <PhoneOff className="h-10 w-10 text-slate-400" />
+                                )
+                            ) : (
+                                peerName ? peerName[0]?.toUpperCase() : "A"
+                            )}
                         </div>
                     </div>
 
@@ -262,7 +311,7 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                 {/* Title & Status */}
                 <div className="space-y-1.5">
                     <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
-                        {peerName}
+                        {status === "ended" ? (endedBy === "agent" ? "Atendimento Concluído" : "Ligação Encerrada") : peerName}
                     </h2>
                     
                     {status === "incoming" && (
@@ -290,13 +339,13 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                     )}
 
                     {status === "ended" && (
-                        <div className="space-y-2">
-                            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800 text-slate-300 border border-white/10 text-xs font-semibold">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                                Chamada Encerrada ({formatTimer(callDuration)})
+                        <div className="space-y-2 pt-1">
+                            <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-slate-900 border border-white/15 text-xs font-semibold text-slate-300">
+                                <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                                <span>Duração: <strong className="text-white font-mono">{formatTimer(callDuration)}</strong></span>
                             </div>
-                            <p className="text-xs text-slate-400">
-                                Obrigado pelo contato. Você já pode fechar esta aba.
+                            <p className="text-xs text-slate-400 max-w-xs mx-auto">
+                                Obrigado pelo contato com nossa equipe. Você já pode fechar esta aba com segurança.
                             </p>
                         </div>
                     )}
@@ -345,7 +394,7 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
 
                         {/* End Call Button */}
                         <Button
-                            onClick={() => handleEndCall("Você encerrou a chamada")}
+                            onClick={() => handleEndCall("Você encerrou a chamada", "client")}
                             size="icon"
                             className="h-16 w-16 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-xl shadow-red-600/40 cursor-pointer transition-transform hover:scale-105 active:scale-95"
                             title="Encerrar Chamada"
@@ -358,10 +407,11 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                 {status === "ended" && (
                     <Button
                         onClick={() => window.close()}
-                        variant="outline"
-                        className="rounded-xl border-white/20 text-white hover:bg-white/10 cursor-pointer text-xs"
+                        size="lg"
+                        className="rounded-full px-8 h-12 bg-white/15 hover:bg-white/25 border border-white/20 text-white font-semibold cursor-pointer text-sm gap-2 shadow-lg hover:scale-105 active:scale-95 transition-all"
                     >
-                        Fechar Janela
+                        <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                        <span>Fechar Janela</span>
                     </Button>
                 )}
 
