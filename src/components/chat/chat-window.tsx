@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Send, Paperclip, ArrowLeft, FileText, Image as ImageIcon, Music, Video, Download, ArrowDown, CornerUpLeft, Copy, Trash2, Info, X, UserCheck, Edit2, Pencil, Mic, Square, Loader2, CheckCircle2, ArrowRightLeft, Zap, Tag, Sparkles, RotateCcw, Lock, Clock, ShieldAlert, Check, CheckCheck, Maximize2, ExternalLink, ZoomIn, ZoomOut, UserPlus, Ban, AlertTriangle } from "lucide-react";
+import { Send, Paperclip, ArrowLeft, FileText, Image as ImageIcon, Music, Video, Download, ArrowDown, CornerUpLeft, Copy, Trash2, Info, X, UserCheck, Edit2, Pencil, Mic, Square, Loader2, CheckCircle2, ArrowRightLeft, Zap, Tag, Sparkles, RotateCcw, Lock, Clock, ShieldAlert, Check, CheckCheck, Maximize2, ExternalLink, ZoomIn, ZoomOut, UserPlus, Ban, AlertTriangle, Phone } from "lucide-react";
 import { ContactInfoDialog, formatPhoneNumberDisplay } from "./contact-info-dialog";
 import { useSession } from "next-auth/react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -36,6 +36,7 @@ import { VoiceStudioDialog } from "./voice-studio-dialog";
 import { VoiceProfile, VOICE_PROFILES } from "@/lib/voice-profiles";
 import { AiStickerDialog } from "./ai-sticker-dialog";
 import { AiSummaryDialog } from "./ai-summary-dialog";
+import { CallDialog } from "./call-dialog";
 
 interface Message {
     id: string;
@@ -387,6 +388,7 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
     const [headerProfilePic, setHeaderProfilePic] = useState<string | null>(null);
     const [isContactInfoOpen, setIsContactInfoOpen] = useState(false);
     const [contactLabels, setContactLabels] = useState<Array<{ id: string; name: string; colorHex: string }>>([]);
+    const [isCallDialogOpen, setIsCallDialogOpen] = useState(false);
 
     useEffect(() => {
         if (!sessionId || !jid) return;
@@ -1690,6 +1692,20 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                 </div>
 
                 <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                    {!isLockedForMe && !isGroupOrBroadcast && (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsCallDialogOpen(true)}
+                            className="h-8 px-2.5 sm:px-3 text-xs gap-1.5 rounded-lg border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 cursor-pointer shadow-xs transition-all font-semibold"
+                            title="Iniciar chamada de voz em tempo real com o cliente"
+                        >
+                            <Phone className="h-3.5 w-3.5 text-emerald-500" />
+                            <span className="hidden sm:inline">Ligar</span>
+                        </Button>
+                    )}
+
                     {!isLockedForMe && (
                         <Button
                             type="button"
@@ -3020,6 +3036,16 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                 sessionId={sessionId}
                 jid={jid}
                 clientName={displayName}
+            />
+
+            {/* Diálogo de Chamada de Voz em Tempo Real */}
+            <CallDialog
+                open={isCallDialogOpen}
+                onOpenChange={setIsCallDialogOpen}
+                sessionId={sessionId}
+                jid={jid}
+                contactName={displayName}
+                operatorName={operatorName || authSession?.user?.name || "Atendente"}
             />
         </div>
     );
