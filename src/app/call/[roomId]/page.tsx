@@ -7,14 +7,17 @@ import {
     PhoneOff, 
     Mic, 
     MicOff, 
-    Volume2, 
-    VolumeX, 
     ShieldCheck, 
     Activity, 
     CheckCircle2, 
     AlertCircle,
     User,
-    Sparkles
+    Sparkles,
+    Star,
+    Send,
+    Heart,
+    Check,
+    MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -24,6 +27,14 @@ const ICE_SERVERS = {
         { urls: "stun:stun1.l.google.com:19302" },
         { urls: "stun:stun2.l.google.com:19302" },
     ]
+};
+
+const RATING_LABELS: Record<number, string> = {
+    1: "Muito insatisfeito 😞",
+    2: "Insatisfeito 🙁",
+    3: "Regular 😐",
+    4: "Bom atendimento 😊",
+    5: "Excelente atendimento! ⭐"
 };
 
 export default function ClientCallPage({ params }: { params: Promise<{ roomId: string }> }) {
@@ -37,6 +48,14 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
     const [peerName, setPeerName] = useState<string>("Atendente Nexus");
     const [endedBy, setEndedBy] = useState<"agent" | "client" | null>(null);
     const [endReason, setEndReason] = useState<string>("Chamada finalizada");
+
+    // Feedback States
+    const [rating, setRating] = useState<number>(5);
+    const [hoverRating, setHoverRating] = useState<number | null>(null);
+    const [comment, setComment] = useState("");
+    const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+    const [submittingFeedback, setSubmittingFeedback] = useState(false);
+    const [windowClosedPrompt, setWindowClosedPrompt] = useState(false);
 
     const socketRef = useRef<Socket | null>(null);
     const peerRef = useRef<RTCPeerConnection | null>(null);
@@ -129,7 +148,7 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                 if (peer.connectionState === "connected") {
                     setStatus("connected");
                 } else if (peer.connectionState === "disconnected" || peer.connectionState === "failed") {
-                    handleEndCall("Conexão encerrada pelo atendente");
+                    handleEndCall("Conexão encerrada pelo atendente", "agent", false);
                 }
             };
 
@@ -140,7 +159,6 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
 
             socket.on("call:peer-joined", async (data: { role: string; name?: string }) => {
                 if (data.name) setPeerName(data.name);
-                // As client, if agent is already in or joined, create offer
                 try {
                     const offer = await peer.createOffer();
                     await peer.setLocalDescription(offer);
@@ -220,8 +238,63 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
         setStatus("ended");
     };
 
+    // Close window helper with cross-browser and mobile fallbacks
+    const handleCloseWindow = () => {
+        setWindowClosedPrompt(true);
+
+        // Try direct window.close
+        try {
+            window.close();
+        } catch {}
+
+        // Try window.open self replacement trick
+        try {
+            window.open('', '_self', '');
+            window.close();
+        } catch {}
+
+        // Fallback for browsers that block script closing (e.g. opened from WhatsApp link)
+        setTimeout(() => {
+            if (!window.closed) {
+                if (window.history.length > 1) {
+                    window.history.back();
+                } else {
+                    window.location.href = "about:blank";
+                }
+            }
+        }, 350);
+    };
+
+    // Submit rating and feedback
+    const handleSubmitFeedback = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (submittingFeedback) return;
+        setSubmittingFeedback(true);
+
+        try {
+            await fetch("/api/call/feedback", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    roomId,
+                    rating,
+                    comment: comment.trim() || undefined,
+                    contactName: "Cliente"
+                })
+            });
+            setFeedbackSubmitted(true);
+        } catch (e) {
+            console.error("Erro ao enviar avaliação:", e);
+            setFeedbackSubmitted(true);
+        } finally {
+            setSubmittingFeedback(false);
+        }
+    };
+
+    const activeRatingDisplay = hoverRating || rating;
+
     return (
-        <div className="min-h-screen w-full bg-slate-950 text-white flex flex-col justify-between items-center p-6 relative overflow-hidden select-none">
+        <div className="min-h-screen w-full bg-slate-950 text-white flex flex-col justify-between items-center p-4 sm:p-6 relative overflow-hidden select-none">
             {/* Ambient Background Lights */}
             <div className="absolute -top-32 -left-32 w-80 h-80 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
             <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-emerald-600/20 rounded-full blur-3xl pointer-events-none" />
@@ -230,22 +303,23 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
             <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
             {/* Top Brand Header */}
-            <header className="w-full max-w-md flex items-center justify-between z-10 pt-2">
+            <header className="w-full max-w-md flex items-center justify-between z-10 pt-1 pb-3">
                 <div className="flex items-center gap-2">
                     <img 
                         src="/nexus-chat-logo-white.png" 
                         alt="NEXUS CHAT" 
-                        className="h-8 w-auto object-contain drop-shadow" 
+                        className="h-7 sm:h-8 w-auto object-contain drop-shadow" 
                     />
                 </div>
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-xs font-semibold text-emerald-400">
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-xs font-semibold text-emerald-400 shadow-sm">
                     <ShieldCheck className="h-3.5 w-3.5" />
                     <span>Conexão Segura</span>
                 </div>
             </header>
 
             {/* Center Content */}
-            <main className="w-full max-w-sm flex flex-col items-center justify-center my-auto z-10 text-center space-y-6">
+            <main className="w-full max-w-sm flex flex-col items-center justify-center my-auto z-10 text-center space-y-5">
+                
                 {/* End of Call Alert Banner */}
                 {status === "ended" && (
                     <div className={`w-full p-4 rounded-2xl border shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-500 text-left ${
@@ -273,51 +347,60 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                     </div>
                 )}
 
-                {/* Caller Avatar */}
-                <div className="relative">
-                    <div className={`w-28 h-28 sm:w-32 sm:h-32 rounded-full p-1 flex items-center justify-center shadow-2xl relative transition-all duration-300 ${
+                {/* Caller Avatar & Waveform Animation */}
+                <div className="relative flex items-center justify-center">
+                    {/* Pulsing Audio Waves when Connected */}
+                    {status === "connected" && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <span className="w-36 h-36 rounded-full border border-emerald-500/30 animate-ping opacity-60" />
+                            <span className="w-44 h-44 rounded-full border border-teal-500/20 animate-pulse opacity-40" />
+                        </div>
+                    )}
+
+                    <div className={`w-24 h-24 sm:w-28 sm:h-28 rounded-full p-1 flex items-center justify-center shadow-2xl relative transition-all duration-300 ${
                         status === "ended"
                             ? endedBy === "agent"
                                 ? "bg-gradient-to-br from-emerald-500 to-teal-700"
                                 : "bg-gradient-to-br from-slate-700 to-slate-800"
-                            : "bg-gradient-to-br from-blue-600 to-indigo-700"
+                            : status === "connected"
+                                ? "bg-gradient-to-br from-emerald-500 via-teal-500 to-blue-600"
+                                : "bg-gradient-to-br from-blue-600 to-indigo-700"
                     }`}>
-                        {status === "connected" && (
-                            <span className="absolute inset-0 rounded-full border-2 border-emerald-400 animate-ping opacity-75" />
-                        )}
-                        {status === "connecting" && (
-                            <span className="absolute inset-0 rounded-full border-2 border-blue-400 animate-pulse opacity-75" />
-                        )}
-                        <div className="w-full h-full rounded-full bg-slate-900 flex items-center justify-center text-3xl font-extrabold text-blue-400 border border-white/10">
+                        <div className="w-full h-full rounded-full bg-slate-900 flex items-center justify-center text-3xl font-extrabold text-blue-400 border border-white/10 overflow-hidden">
                             {status === "ended" ? (
                                 endedBy === "agent" ? (
-                                    <CheckCircle2 className="h-12 w-12 text-emerald-400" />
+                                    <CheckCircle2 className="h-12 w-12 text-emerald-400 animate-in zoom-in-75 duration-300" />
                                 ) : (
                                     <PhoneOff className="h-10 w-10 text-slate-400" />
                                 )
                             ) : (
-                                peerName ? peerName[0]?.toUpperCase() : "A"
+                                <User className="h-12 w-12 text-blue-300" />
                             )}
                         </div>
-                    </div>
 
-                    {status === "connected" && (
-                        <div className="absolute -bottom-1 -right-1 p-2 rounded-full bg-emerald-500 text-white shadow-lg border-2 border-slate-950">
-                            <Activity className="h-4 w-4 animate-pulse" />
-                        </div>
-                    )}
+                        {status === "connected" && (
+                            <div className="absolute -bottom-1 -right-1 p-2 rounded-full bg-emerald-500 text-white shadow-lg border-2 border-slate-950">
+                                <Activity className="h-4 w-4 animate-pulse" />
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Title & Status */}
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 w-full">
                     <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
                         {status === "ended" ? (endedBy === "agent" ? "Atendimento Concluído" : "Ligação Encerrada") : peerName}
                     </h2>
                     
                     {status === "incoming" && (
-                        <p className="text-sm text-slate-400 animate-pulse">
-                            Chamando você para ligação de voz...
-                        </p>
+                        <div className="space-y-1">
+                            <p className="text-sm text-slate-300 animate-pulse">
+                                Chamando você para ligação de voz...
+                            </p>
+                            <p className="text-[11px] text-slate-500">
+                                Áudio HD criptografado direto no navegador
+                            </p>
+                        </div>
                     )}
 
                     {status === "connecting" && (
@@ -327,26 +410,24 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                     )}
 
                     {status === "connected" && (
-                        <div className="space-y-1">
-                            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold tracking-wider">
+                        <div className="space-y-1.5">
+                            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold tracking-wider shadow-inner">
                                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                                 {formatTimer(callDuration)}
                             </div>
-                            <p className="text-[11px] text-slate-400">
-                                Áudio ativo em alta fidelidade
-                            </p>
+                            <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+                                <span>Qualidade de Áudio HD (Opus)</span>
+                            </div>
                         </div>
                     )}
 
                     {status === "ended" && (
-                        <div className="space-y-2 pt-1">
+                        <div className="space-y-1 pt-0.5">
                             <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-slate-900 border border-white/15 text-xs font-semibold text-slate-300">
                                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
                                 <span>Duração: <strong className="text-white font-mono">{formatTimer(callDuration)}</strong></span>
                             </div>
-                            <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                                Obrigado pelo contato com nossa equipe. Você já pode fechar esta aba com segurança.
-                            </p>
                         </div>
                     )}
                 </div>
@@ -358,10 +439,97 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                         <span>{errorMsg}</span>
                     </div>
                 )}
+
+                {/* 5-STAR RATING & FEEDBACK AREA (When Call Ends) */}
+                {status === "ended" && (
+                    <div className="w-full rounded-2xl bg-slate-900/90 border border-white/10 p-5 shadow-2xl backdrop-blur-xl space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-500 text-left">
+                        {!feedbackSubmitted ? (
+                            <form onSubmit={handleSubmitFeedback} className="space-y-4">
+                                <div className="text-center space-y-1">
+                                    <h3 className="text-sm font-bold text-white flex items-center justify-center gap-1.5">
+                                        <Star className="h-4 w-4 text-amber-400 fill-amber-400" />
+                                        Como foi o seu atendimento?
+                                    </h3>
+                                    <p className="text-[11px] text-slate-400">
+                                        Avalie com estrelas a qualidade do suporte recebido
+                                    </p>
+                                </div>
+
+                                {/* Star Rating Buttons */}
+                                <div className="flex flex-col items-center justify-center gap-1.5 py-1">
+                                    <div className="flex items-center justify-center gap-2">
+                                        {[1, 2, 3, 4, 5].map((starValue) => {
+                                            const isFilled = starValue <= activeRatingDisplay;
+                                            return (
+                                                <button
+                                                    key={starValue}
+                                                    type="button"
+                                                    onClick={() => setRating(starValue)}
+                                                    onMouseEnter={() => setHoverRating(starValue)}
+                                                    onMouseLeave={() => setHoverRating(null)}
+                                                    className="p-1 rounded-lg transition-transform hover:scale-125 active:scale-95 cursor-pointer focus:outline-none"
+                                                    title={`Nota ${starValue}`}
+                                                >
+                                                    <Star 
+                                                        className={`h-7 w-7 transition-colors duration-200 ${
+                                                            isFilled 
+                                                                ? "text-amber-400 fill-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]" 
+                                                                : "text-slate-600 hover:text-slate-400"
+                                                        }`} 
+                                                    />
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <span className="text-xs font-semibold text-amber-400/90 transition-all">
+                                        {RATING_LABELS[activeRatingDisplay]}
+                                    </span>
+                                </div>
+
+                                {/* Optional Feedback Textarea */}
+                                <div className="space-y-1">
+                                    <label className="text-[11px] font-medium text-slate-400 flex items-center gap-1">
+                                        <MessageSquare className="h-3 w-3" />
+                                        <span>Mensagem ou sugestão (opcional):</span>
+                                    </label>
+                                    <textarea
+                                        value={comment}
+                                        onChange={(e) => setComment(e.target.value)}
+                                        placeholder="Conte brevemente o que achou do atendimento..."
+                                        maxLength={300}
+                                        rows={2}
+                                        className="w-full text-xs rounded-xl bg-slate-950/70 border border-white/10 p-2.5 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-amber-400/50 resize-none transition-all"
+                                    />
+                                </div>
+
+                                <Button
+                                    type="submit"
+                                    disabled={submittingFeedback}
+                                    className="w-full h-10 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-bold text-xs gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition-transform hover:scale-[1.02] active:scale-98"
+                                >
+                                    <Send className="h-3.5 w-3.5" />
+                                    <span>{submittingFeedback ? "Enviando..." : "Enviar Avaliação"}</span>
+                                </Button>
+                            </form>
+                        ) : (
+                            <div className="py-2 text-center space-y-2 animate-in fade-in zoom-in-95">
+                                <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto shadow-lg">
+                                    <Heart className="h-6 w-6 fill-emerald-400/30" />
+                                </div>
+                                <h4 className="text-sm font-bold text-white">
+                                    Muito obrigado pelo seu feedback!
+                                </h4>
+                                <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
+                                    Sua nota de <strong className="text-amber-400">{rating} estrelas</strong> foi registrada. Sua opinião é essencial para mantermos a excelência do nosso suporte.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
             </main>
 
             {/* Bottom Call Controls */}
-            <footer className="w-full max-w-sm flex flex-col items-center z-10 pb-4">
+            <footer className="w-full max-w-sm flex flex-col items-center z-10 pb-2">
                 {status === "incoming" && (
                     <div className="w-full flex items-center justify-center gap-6">
                         <Button
@@ -376,46 +544,64 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                 )}
 
                 {status === "connected" && (
-                    <div className="w-full flex items-center justify-center gap-5">
-                        {/* Mute Button */}
-                        <Button
-                            onClick={toggleMute}
-                            size="icon"
-                            variant="secondary"
-                            className={`h-14 w-14 rounded-full border border-white/10 shadow-lg cursor-pointer transition-all ${
-                                isMuted 
-                                    ? "bg-amber-500 text-white hover:bg-amber-600" 
-                                    : "bg-white/15 text-white hover:bg-white/25"
-                            }`}
-                            title={isMuted ? "Ativar Microfone" : "Silenciar Microfone"}
-                        >
-                            {isMuted ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
-                        </Button>
+                    <div className="w-full flex items-center justify-center gap-6">
+                        {/* Mute Button with Dynamic Status */}
+                        <div className="flex flex-col items-center gap-1">
+                            <Button
+                                onClick={toggleMute}
+                                size="icon"
+                                variant="secondary"
+                                className={`h-14 w-14 rounded-full border shadow-lg cursor-pointer transition-all ${
+                                    isMuted 
+                                        ? "bg-amber-500 text-white border-amber-400 hover:bg-amber-600 shadow-amber-500/30" 
+                                        : "bg-white/15 text-white border-white/20 hover:bg-white/25"
+                                }`}
+                                title={isMuted ? "Desmutar microfone" : "Silenciar microfone"}
+                            >
+                                {isMuted ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
+                            </Button>
+                            <span className="text-[10px] text-slate-400 font-medium">
+                                {isMuted ? "Mutado" : "Microfone"}
+                            </span>
+                        </div>
 
                         {/* End Call Button */}
-                        <Button
-                            onClick={() => handleEndCall("Você encerrou a chamada", "client")}
-                            size="icon"
-                            className="h-16 w-16 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-xl shadow-red-600/40 cursor-pointer transition-transform hover:scale-105 active:scale-95"
-                            title="Encerrar Chamada"
-                        >
-                            <PhoneOff className="h-7 w-7" />
-                        </Button>
+                        <div className="flex flex-col items-center gap-1">
+                            <Button
+                                onClick={() => handleEndCall("Você encerrou a chamada", "client")}
+                                size="icon"
+                                className="h-16 w-16 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-xl shadow-red-600/40 cursor-pointer transition-transform hover:scale-105 active:scale-95"
+                                title="Encerrar Chamada"
+                            >
+                                <PhoneOff className="h-7 w-7" />
+                            </Button>
+                            <span className="text-[10px] text-red-400 font-semibold">
+                                Desligar
+                            </span>
+                        </div>
                     </div>
                 )}
 
                 {status === "ended" && (
-                    <Button
-                        onClick={() => window.close()}
-                        size="lg"
-                        className="rounded-full px-8 h-12 bg-white/15 hover:bg-white/25 border border-white/20 text-white font-semibold cursor-pointer text-sm gap-2 shadow-lg hover:scale-105 active:scale-95 transition-all"
-                    >
-                        <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                        <span>Fechar Janela</span>
-                    </Button>
+                    <div className="w-full space-y-2 text-center pt-2">
+                        <Button
+                            onClick={handleCloseWindow}
+                            size="lg"
+                            className="w-full h-12 rounded-full bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold cursor-pointer text-sm gap-2 shadow-lg hover:scale-[1.02] active:scale-98 transition-all"
+                        >
+                            <Check className="h-4 w-4 text-emerald-400" />
+                            <span>Fechar Janela</span>
+                        </Button>
+
+                        {windowClosedPrompt && (
+                            <p className="text-[11px] text-slate-400 animate-in fade-in">
+                                Chamada finalizada com segurança. Você já pode fechar esta aba no seu navegador.
+                            </p>
+                        )}
+                    </div>
                 )}
 
-                <div className="mt-6 text-center">
+                <div className="mt-4 text-center">
                     <p className="text-[10px] text-slate-500">
                         NEXUS SOFT TECH • Tecnologia de Atendimento Inteligente
                     </p>
@@ -424,4 +610,3 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
         </div>
     );
 }
-
