@@ -49,7 +49,7 @@ ${callUrl}
 _Esta chamada é criptografada e conectada diretamente com nossa equipe._`;
 
         // Send invite via WhatsApp
-        await ChatService.sendTextMessage(sessionId, jid, inviteMessage);
+        await ChatService.sendTextMessage(sessionId, jid, { text: inviteMessage });
 
         return NextResponse.json({
             status: true,

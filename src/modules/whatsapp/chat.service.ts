@@ -368,7 +368,7 @@ export class ChatService {
             }
         }
 
-        let msgPayload = { ...messagePayload };
+        let msgPayload = typeof messagePayload === "string" ? { text: messagePayload } : { ...messagePayload };
 
         // Normalize "text" to "caption" if a media message is sent with "text"
         if (msgPayload.text && (msgPayload.image || msgPayload.video || msgPayload.document || msgPayload.audio)) {
