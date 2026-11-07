@@ -1,6 +1,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { getAuthenticatedUser, canAccessSession } from "@/lib/api-auth";
 import { ChatService } from "@/modules/whatsapp/chat.service";
+import { CallFeedbackService } from "@/modules/call/call-feedback.service";
 import crypto from "crypto";
 
 export async function POST(request: NextRequest) {
@@ -47,6 +48,16 @@ Olá, *${clientName}*! O atendente *${opName}* está convidando você para uma l
 ${callUrl}
 
 _Esta chamada é criptografada e conectada diretamente com nossa equipe._`;
+
+        // Register room metadata for feedback tracking
+        await CallFeedbackService.registerRoom({
+            roomId,
+            sessionId,
+            jid,
+            operatorName: opName,
+            contactName: clientName,
+            createdAt: new Date().toISOString()
+        });
 
         // Send invite via WhatsApp
         await ChatService.sendTextMessage(sessionId, jid, { text: inviteMessage });

@@ -1,5 +1,6 @@
 import { NextResponse, NextRequest } from "next/server";
 import { logger } from "@/lib/logger";
+import { CallFeedbackService } from "@/modules/call/call-feedback.service";
 
 export async function POST(request: NextRequest) {
     try {
@@ -13,11 +14,19 @@ export async function POST(request: NextRequest) {
             }, { status: 400 });
         }
 
-        logger.info("CallFeedback", `Feedback recebido para sala ${roomId}: ${rating} estrelas. Comentário: "${comment || "Sem comentário"}" (Cliente: ${contactName || "Anônimo"})`);
+        const savedRecord = await CallFeedbackService.saveFeedback({
+            roomId,
+            rating,
+            comment,
+            contactName
+        });
+
+        logger.info("CallFeedback", `Feedback salvo e despachado para sala ${roomId}: ${rating} estrelas.`);
 
         return NextResponse.json({
             status: true,
-            message: "Avaliação registrada com sucesso. Muito obrigado pelo seu feedback!"
+            message: "Avaliação registrada com sucesso. Muito obrigado pelo seu feedback!",
+            data: savedRecord
         });
     } catch (error: any) {
         console.error("Erro ao registrar avaliação de chamada:", error);
@@ -28,3 +37,4 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
     }
 }
+

@@ -27,6 +27,7 @@ import {
     Tag,
     MessageCircleReply,
     UserPlus,
+    Star,
 } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
@@ -43,6 +44,7 @@ const navGroups: NavGroup[] = [
         label: "Principal",
         items: [
             { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+            { href: "/dashboard/feedbacks", label: "Avaliações e Feedbacks", icon: Star },
             { href: "/dashboard/sessions", label: "Sessões / QR Code", icon: QrCode },
         ],
     },

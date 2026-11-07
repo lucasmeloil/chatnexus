@@ -30,11 +30,12 @@ const ICE_SERVERS = {
 };
 
 const RATING_LABELS: Record<number, string> = {
-    1: "Muito insatisfeito 😞",
-    2: "Insatisfeito 🙁",
-    3: "Regular 😐",
-    4: "Bom atendimento 😊",
-    5: "Excelente atendimento! ⭐"
+    0: "Toque nas estrelas para avaliar",
+    1: "1 estrela • Muito insatisfeito 😞",
+    2: "2 estrelas • Insatisfeito 🙁",
+    3: "3 estrelas • Regular 😐",
+    4: "4 estrelas • Bom atendimento 😊",
+    5: "5 estrelas • Excelente atendimento! ⭐"
 };
 
 export default function ClientCallPage({ params }: { params: Promise<{ roomId: string }> }) {
@@ -49,8 +50,8 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
     const [endedBy, setEndedBy] = useState<"agent" | "client" | null>(null);
     const [endReason, setEndReason] = useState<string>("Chamada finalizada");
 
-    // Feedback States
-    const [rating, setRating] = useState<number>(5);
+    // Feedback States (Start with 0 - empty stars until client clicks)
+    const [rating, setRating] = useState<number>(0);
     const [hoverRating, setHoverRating] = useState<number | null>(null);
     const [comment, setComment] = useState("");
     const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
@@ -291,10 +292,10 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
         }
     };
 
-    const activeRatingDisplay = hoverRating || rating;
+    const activeRatingDisplay = hoverRating !== null ? hoverRating : rating;
 
     return (
-        <div className="min-h-screen w-full bg-slate-950 text-white flex flex-col justify-between items-center p-4 sm:p-6 relative overflow-hidden select-none">
+        <div className="min-h-[100dvh] w-full bg-slate-950 text-white flex flex-col justify-between items-center p-3 sm:p-6 relative overflow-y-auto select-none">
             {/* Ambient Background Lights */}
             <div className="absolute -top-32 -left-32 w-80 h-80 bg-blue-600/20 rounded-full blur-3xl pointer-events-none" />
             <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-emerald-600/20 rounded-full blur-3xl pointer-events-none" />
@@ -303,41 +304,41 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
             <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
             {/* Top Brand Header */}
-            <header className="w-full max-w-md flex items-center justify-between z-10 pt-1 pb-3">
+            <header className="w-full max-w-sm sm:max-w-md flex items-center justify-between z-10 pt-1 pb-2">
                 <div className="flex items-center gap-2">
                     <img 
                         src="/nexus-chat-logo-white.png" 
                         alt="NEXUS CHAT" 
-                        className="h-7 sm:h-8 w-auto object-contain drop-shadow" 
+                        className="h-6 sm:h-8 w-auto object-contain drop-shadow" 
                     />
                 </div>
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-xs font-semibold text-emerald-400 shadow-sm">
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-[11px] sm:text-xs font-semibold text-emerald-400 shadow-sm">
                     <ShieldCheck className="h-3.5 w-3.5" />
                     <span>Conexão Segura</span>
                 </div>
             </header>
 
             {/* Center Content */}
-            <main className="w-full max-w-sm flex flex-col items-center justify-center my-auto z-10 text-center space-y-5">
+            <main className="w-full max-w-sm flex flex-col items-center justify-center my-auto z-10 text-center space-y-3 sm:space-y-4 py-1">
                 
                 {/* End of Call Alert Banner */}
                 {status === "ended" && (
-                    <div className={`w-full p-4 rounded-2xl border shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-500 text-left ${
+                    <div className={`w-full p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-xl backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-500 text-left ${
                         endedBy === "agent" 
                             ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-100" 
                             : "bg-slate-800/80 border-white/15 text-slate-200"
                     }`}>
-                        <div className="flex items-start gap-3">
-                            <div className={`p-2 rounded-xl shrink-0 ${
+                        <div className="flex items-start gap-2.5 sm:gap-3">
+                            <div className={`p-1.5 sm:p-2 rounded-lg sm:rounded-xl shrink-0 ${
                                 endedBy === "agent" ? "bg-emerald-500/25 text-emerald-400" : "bg-white/10 text-slate-300"
                             }`}>
-                                {endedBy === "agent" ? <CheckCircle2 className="h-6 w-6" /> : <PhoneOff className="h-6 w-6" />}
+                                {endedBy === "agent" ? <CheckCircle2 className="h-5 w-5 sm:h-6 sm:w-6" /> : <PhoneOff className="h-5 w-5 sm:h-6 sm:w-6" />}
                             </div>
                             <div className="space-y-0.5">
-                                <h3 className="text-sm font-bold tracking-tight text-white">
+                                <h3 className="text-xs sm:text-sm font-bold tracking-tight text-white">
                                     {endedBy === "agent" ? "Atendimento Finalizado pelo Atendente" : "Chamada Finalizada por Você"}
                                 </h3>
-                                <p className="text-xs text-slate-300 leading-relaxed">
+                                <p className="text-[11px] sm:text-xs text-slate-300 leading-relaxed">
                                     {endedBy === "agent" 
                                         ? `O atendente ${peerName} encerrou esta ligação de voz.`
                                         : "Esta chamada de voz foi encerrada por você."}
@@ -352,70 +353,68 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                     {/* Pulsing Audio Waves when Connected */}
                     {status === "connected" && (
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <span className="w-36 h-36 rounded-full border border-emerald-500/30 animate-ping opacity-60" />
-                            <span className="w-44 h-44 rounded-full border border-teal-500/20 animate-pulse opacity-40" />
+                            <span className="w-28 h-28 sm:w-36 sm:h-36 rounded-full border border-emerald-500/30 animate-ping opacity-60" />
+                            <span className="w-36 h-36 sm:w-44 sm:h-44 rounded-full border border-teal-500/20 animate-pulse opacity-40" />
                         </div>
                     )}
 
-                    <div className={`w-24 h-24 sm:w-28 sm:h-28 rounded-full p-1 flex items-center justify-center shadow-2xl relative transition-all duration-300 ${
+                    <div className={`rounded-full p-1 flex items-center justify-center shadow-2xl relative transition-all duration-300 ${
                         status === "ended"
-                            ? endedBy === "agent"
-                                ? "bg-gradient-to-br from-emerald-500 to-teal-700"
-                                : "bg-gradient-to-br from-slate-700 to-slate-800"
+                            ? "w-14 h-14 sm:w-20 sm:h-20 " + (endedBy === "agent" ? "bg-gradient-to-br from-emerald-500 to-teal-700" : "bg-gradient-to-br from-slate-700 to-slate-800")
                             : status === "connected"
-                                ? "bg-gradient-to-br from-emerald-500 via-teal-500 to-blue-600"
-                                : "bg-gradient-to-br from-blue-600 to-indigo-700"
+                                ? "w-20 h-20 sm:w-28 sm:h-28 bg-gradient-to-br from-emerald-500 via-teal-500 to-blue-600"
+                                : "w-20 h-20 sm:w-28 sm:h-28 bg-gradient-to-br from-blue-600 to-indigo-700"
                     }`}>
-                        <div className="w-full h-full rounded-full bg-slate-900 flex items-center justify-center text-3xl font-extrabold text-blue-400 border border-white/10 overflow-hidden">
+                        <div className="w-full h-full rounded-full bg-slate-900 flex items-center justify-center font-extrabold text-blue-400 border border-white/10 overflow-hidden">
                             {status === "ended" ? (
                                 endedBy === "agent" ? (
-                                    <CheckCircle2 className="h-12 w-12 text-emerald-400 animate-in zoom-in-75 duration-300" />
+                                    <CheckCircle2 className="h-8 w-8 sm:h-10 sm:w-10 text-emerald-400 animate-in zoom-in-75 duration-300" />
                                 ) : (
-                                    <PhoneOff className="h-10 w-10 text-slate-400" />
+                                    <PhoneOff className="h-6 w-6 sm:h-8 sm:w-8 text-slate-400" />
                                 )
                             ) : (
-                                <User className="h-12 w-12 text-blue-300" />
+                                <User className="h-9 w-9 sm:h-12 sm:w-12 text-blue-300" />
                             )}
                         </div>
 
                         {status === "connected" && (
-                            <div className="absolute -bottom-1 -right-1 p-2 rounded-full bg-emerald-500 text-white shadow-lg border-2 border-slate-950">
-                                <Activity className="h-4 w-4 animate-pulse" />
+                            <div className="absolute -bottom-1 -right-1 p-1.5 sm:p-2 rounded-full bg-emerald-500 text-white shadow-lg border-2 border-slate-950">
+                                <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-pulse" />
                             </div>
                         )}
                     </div>
                 </div>
 
                 {/* Title & Status */}
-                <div className="space-y-1.5 w-full">
-                    <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+                <div className="space-y-1 w-full">
+                    <h2 className="text-base sm:text-xl font-bold tracking-tight text-white">
                         {status === "ended" ? (endedBy === "agent" ? "Atendimento Concluído" : "Ligação Encerrada") : peerName}
                     </h2>
                     
                     {status === "incoming" && (
                         <div className="space-y-1">
-                            <p className="text-sm text-slate-300 animate-pulse">
+                            <p className="text-xs sm:text-sm text-slate-300 animate-pulse">
                                 Chamando você para ligação de voz...
                             </p>
-                            <p className="text-[11px] text-slate-500">
+                            <p className="text-[10px] sm:text-[11px] text-slate-500">
                                 Áudio HD criptografado direto no navegador
                             </p>
                         </div>
                     )}
 
                     {status === "connecting" && (
-                        <p className="text-sm text-blue-400 flex items-center justify-center gap-1.5 font-medium">
-                            <Sparkles className="h-4 w-4 animate-spin" /> Conectando áudio criptografado...
+                        <p className="text-xs sm:text-sm text-blue-400 flex items-center justify-center gap-1.5 font-medium">
+                            <Sparkles className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" /> Conectando áudio criptografado...
                         </p>
                     )}
 
                     {status === "connected" && (
-                        <div className="space-y-1.5">
-                            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold tracking-wider shadow-inner">
+                        <div className="space-y-1">
+                            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-mono font-bold tracking-wider shadow-inner">
                                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                                 {formatTimer(callDuration)}
                             </div>
-                            <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+                            <div className="flex items-center justify-center gap-1.5 text-[10px] sm:text-[11px] text-slate-400">
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
                                 <span>Qualidade de Áudio HD (Opus)</span>
                             </div>
@@ -423,18 +422,16 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                     )}
 
                     {status === "ended" && (
-                        <div className="space-y-1 pt-0.5">
-                            <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-slate-900 border border-white/15 text-xs font-semibold text-slate-300">
-                                <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                                <span>Duração: <strong className="text-white font-mono">{formatTimer(callDuration)}</strong></span>
-                            </div>
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-white/15 text-[11px] sm:text-xs font-semibold text-slate-300">
+                            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                            <span>Duração: <strong className="text-white font-mono">{formatTimer(callDuration)}</strong></span>
                         </div>
                     )}
                 </div>
 
                 {/* Error Banner */}
                 {errorMsg && (
-                    <div className="p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs flex items-center gap-2 text-left animate-in fade-in">
+                    <div className="p-2.5 sm:p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs flex items-center gap-2 text-left animate-in fade-in">
                         <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
                         <span>{errorMsg}</span>
                     </div>
@@ -442,24 +439,24 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
 
                 {/* 5-STAR RATING & FEEDBACK AREA (When Call Ends) */}
                 {status === "ended" && (
-                    <div className="w-full rounded-2xl bg-slate-900/90 border border-white/10 p-5 shadow-2xl backdrop-blur-xl space-y-4 animate-in fade-in slide-in-from-bottom-3 duration-500 text-left">
+                    <div className="w-full rounded-xl sm:rounded-2xl bg-slate-900/90 border border-white/10 p-3.5 sm:p-4 shadow-2xl backdrop-blur-xl space-y-3 animate-in fade-in slide-in-from-bottom-3 duration-500 text-left">
                         {!feedbackSubmitted ? (
-                            <form onSubmit={handleSubmitFeedback} className="space-y-4">
-                                <div className="text-center space-y-1">
-                                    <h3 className="text-sm font-bold text-white flex items-center justify-center gap-1.5">
-                                        <Star className="h-4 w-4 text-amber-400 fill-amber-400" />
+                            <form onSubmit={handleSubmitFeedback} className="space-y-3">
+                                <div className="text-center space-y-0.5">
+                                    <h3 className="text-xs sm:text-sm font-bold text-white flex items-center justify-center gap-1.5">
+                                        <Star className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-400 fill-amber-400" />
                                         Como foi o seu atendimento?
                                     </h3>
-                                    <p className="text-[11px] text-slate-400">
+                                    <p className="text-[10px] sm:text-[11px] text-slate-400">
                                         Avalie com estrelas a qualidade do suporte recebido
                                     </p>
                                 </div>
 
                                 {/* Star Rating Buttons */}
-                                <div className="flex flex-col items-center justify-center gap-1.5 py-1">
-                                    <div className="flex items-center justify-center gap-2">
+                                <div className="flex flex-col items-center justify-center gap-1 py-0.5">
+                                    <div className="flex items-center justify-center gap-1.5 sm:gap-2">
                                         {[1, 2, 3, 4, 5].map((starValue) => {
-                                            const isFilled = starValue <= activeRatingDisplay;
+                                            const isFilled = activeRatingDisplay > 0 && starValue <= activeRatingDisplay;
                                             return (
                                                 <button
                                                     key={starValue}
@@ -471,56 +468,68 @@ export default function ClientCallPage({ params }: { params: Promise<{ roomId: s
                                                     title={`Nota ${starValue}`}
                                                 >
                                                     <Star 
-                                                        className={`h-7 w-7 transition-colors duration-200 ${
+                                                        className={`h-6 w-6 sm:h-7 sm:w-7 transition-colors duration-200 ${
                                                             isFilled 
-                                                                ? "text-amber-400 fill-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]" 
-                                                                : "text-slate-600 hover:text-slate-400"
+                                                                ? "text-amber-400 fill-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]" 
+                                                                : "text-slate-600 hover:text-amber-400/60"
                                                         }`} 
                                                     />
                                                 </button>
                                             );
                                         })}
                                     </div>
-                                    <span className="text-xs font-semibold text-amber-400/90 transition-all">
+                                    <span className={`text-[11px] sm:text-xs font-semibold transition-all ${
+                                        activeRatingDisplay > 0 ? "text-amber-400" : "text-slate-400"
+                                    }`}>
                                         {RATING_LABELS[activeRatingDisplay]}
                                     </span>
                                 </div>
 
                                 {/* Optional Feedback Textarea */}
                                 <div className="space-y-1">
-                                    <label className="text-[11px] font-medium text-slate-400 flex items-center gap-1">
+                                    <label className="text-[10px] sm:text-[11px] font-medium text-slate-400 flex items-center gap-1">
                                         <MessageSquare className="h-3 w-3" />
                                         <span>Mensagem ou sugestão (opcional):</span>
                                     </label>
                                     <textarea
                                         value={comment}
                                         onChange={(e) => setComment(e.target.value)}
-                                        placeholder="Conte brevemente o que achou do atendimento..."
+                                        placeholder="Conte brevemente o que achou..."
                                         maxLength={300}
                                         rows={2}
-                                        className="w-full text-xs rounded-xl bg-slate-950/70 border border-white/10 p-2.5 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-amber-400/50 resize-none transition-all"
+                                        className="w-full text-xs rounded-xl bg-slate-950/70 border border-white/10 p-2 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-amber-400/50 resize-none transition-all"
                                     />
                                 </div>
 
                                 <Button
                                     type="submit"
-                                    disabled={submittingFeedback}
-                                    className="w-full h-10 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-bold text-xs gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition-transform hover:scale-[1.02] active:scale-98"
+                                    disabled={submittingFeedback || rating === 0}
+                                    className={`w-full h-9 sm:h-10 rounded-xl font-bold text-xs gap-2 shadow-lg transition-all ${
+                                        rating === 0
+                                            ? "bg-slate-800 text-slate-400 border border-white/5 opacity-60 cursor-not-allowed"
+                                            : "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 shadow-amber-500/20 cursor-pointer hover:scale-[1.01] active:scale-98"
+                                    }`}
                                 >
                                     <Send className="h-3.5 w-3.5" />
-                                    <span>{submittingFeedback ? "Enviando..." : "Enviar Avaliação"}</span>
+                                    <span>
+                                        {submittingFeedback 
+                                            ? "Enviando..." 
+                                            : rating === 0 
+                                                ? "Escolha as estrelas acima" 
+                                                : "Enviar Avaliação"}
+                                    </span>
                                 </Button>
                             </form>
                         ) : (
-                            <div className="py-2 text-center space-y-2 animate-in fade-in zoom-in-95">
-                                <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto shadow-lg">
-                                    <Heart className="h-6 w-6 fill-emerald-400/30" />
+                            <div className="py-2 text-center space-y-1.5 animate-in fade-in zoom-in-95">
+                                <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto shadow-lg">
+                                    <Heart className="h-5 w-5 fill-emerald-400/30" />
                                 </div>
-                                <h4 className="text-sm font-bold text-white">
+                                <h4 className="text-xs sm:text-sm font-bold text-white">
                                     Muito obrigado pelo seu feedback!
                                 </h4>
-                                <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
-                                    Sua nota de <strong className="text-amber-400">{rating} estrelas</strong> foi registrada. Sua opinião é essencial para mantermos a excelência do nosso suporte.
+                                <p className="text-[11px] sm:text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
+                                    Sua nota de <strong className="text-amber-400">{rating} estrelas</strong> foi registrada na conversa e no atendimento.
                                 </p>
                             </div>
                         )}
