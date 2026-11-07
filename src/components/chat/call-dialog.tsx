@@ -300,8 +300,38 @@ export function CallDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-md p-6 rounded-2xl border border-border/60 bg-card/95 backdrop-blur-xl shadow-2xl">
+        <Dialog 
+            open={open} 
+            onOpenChange={(nextOpen) => {
+                // Previne fechamento acidental durante a chamada ativa
+                if (!nextOpen && status !== "ended") {
+                    toast.warning("Para sair da ligação, clique no botão 'Desligar'.", { id: "call-prevent-close" });
+                    return;
+                }
+                onOpenChange(nextOpen);
+            }}
+        >
+            <DialogContent 
+                showCloseButton={status === "ended"}
+                onPointerDownOutside={(e) => {
+                    // Previne fechar ao clicar fora da caixa de diálogo
+                    e.preventDefault();
+                    if (status !== "ended") {
+                        toast.warning("Ligação ativa! Para encerrar, clique no botão 'Desligar'.", { id: "call-prevent-close" });
+                    }
+                }}
+                onInteractOutside={(e) => {
+                    e.preventDefault();
+                }}
+                onEscapeKeyDown={(e) => {
+                    // Previne fechar ao pressionar a tecla ESC no teclado
+                    e.preventDefault();
+                    if (status !== "ended") {
+                        toast.warning("Ligação ativa! Para encerrar, clique no botão 'Desligar'.", { id: "call-prevent-close" });
+                    }
+                }}
+                className="sm:max-w-md p-6 rounded-2xl border border-border/60 bg-card/95 backdrop-blur-xl shadow-2xl"
+            >
                 {/* Audio element for remote sound */}
                 <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
