@@ -121,7 +121,12 @@ function LoginForm() {
               <img 
                 src="/nexus-chat-logo.png" 
                 alt="Nexus Chat Enterprise" 
-                className="h-14 sm:h-16 lg:h-20 w-auto object-contain drop-shadow-2xs"
+                className="h-14 sm:h-16 lg:h-20 w-auto object-contain drop-shadow-2xs dark:hidden" 
+              />
+              <img 
+                src="/nexus-chat-logo-white.png" 
+                alt="Nexus Chat Enterprise" 
+                className="h-14 sm:h-16 lg:h-20 w-auto object-contain drop-shadow-2xs hidden dark:block" 
               />
             </div>
 
@@ -213,7 +218,12 @@ function LoginForm() {
               <img 
                 src="/nexus-chat-logo.png" 
                 alt="Nexus Chat" 
-                className="h-9 sm:h-10 w-auto object-contain mb-4"
+                className="h-9 sm:h-10 w-auto object-contain mb-4 dark:hidden" 
+              />
+              <img 
+                src="/nexus-chat-logo-white.png" 
+                alt="Nexus Chat" 
+                className="h-9 sm:h-10 w-auto object-contain mb-4 hidden dark:block" 
               />
               <div className="flex items-center gap-2">
                 <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">Acesso ao Sistema</h2>

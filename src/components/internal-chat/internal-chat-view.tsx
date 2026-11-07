@@ -506,7 +506,7 @@ export function InternalChatView() {
                             placeholder={`Enviar mensagem interna em ${selectedTarget.name}...`}
                             value={inputText}
                             onChange={(e) => setInputText(e.target.value)}
-                            className="flex-1 h-9 text-xs rounded-xl bg-background"
+                            className="flex-1 h-9 text-xs rounded-xl bg-card border-border/70 dark:border-border/90 text-foreground placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary/20"
                         />
 
                         <Button

@@ -48,7 +48,12 @@ export function SidebarShell({ appName, userName, userEmail, version }: SidebarS
                             <img 
                                 src="/nexus-chat-logo.png" 
                                 alt="NEXUS CHAT" 
-                                className="h-8 w-auto max-w-[180px] object-contain drop-shadow-sm" 
+                                className="h-8 w-auto max-w-[180px] object-contain drop-shadow-sm dark:hidden" 
+                            />
+                            <img 
+                                src="/nexus-chat-logo-white.png" 
+                                alt="NEXUS CHAT" 
+                                className="h-8 w-auto max-w-[180px] object-contain drop-shadow-sm hidden dark:block" 
                             />
                         </div>
                         <button

@@ -130,7 +130,12 @@ export function ChatLayoutClient({ sessionId, initialJid }: ChatLayoutClientProp
                             <img
                                 src="/nexus-chat-logo.png"
                                 alt="Nexus Chat"
-                                className="h-16 sm:h-20 w-auto object-contain opacity-85 drop-shadow-sm transition-transform duration-300 hover:scale-105 pointer-events-none"
+                                className="h-16 sm:h-20 w-auto object-contain opacity-85 drop-shadow-sm transition-transform duration-300 hover:scale-105 pointer-events-none dark:hidden"
+                            />
+                            <img
+                                src="/nexus-chat-logo-white.png"
+                                alt="Nexus Chat"
+                                className="h-16 sm:h-20 w-auto object-contain opacity-95 drop-shadow-sm transition-transform duration-300 hover:scale-105 pointer-events-none hidden dark:block"
                             />
                         </div>
                     </div>

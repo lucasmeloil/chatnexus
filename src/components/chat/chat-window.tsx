@@ -2291,8 +2291,8 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                         </div>
                                     )}
                                     <div className={cn(
-                                        "flex flex-col max-w-[85%] sm:max-w-[70%] rounded-2xl px-3 py-2 shadow-sm overflow-hidden cursor-context-menu",
-                                        msg.fromMe ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-background border border-border/40 rounded-bl-sm"
+                                        "flex flex-col max-w-[85%] sm:max-w-[70%] rounded-2xl px-3 py-2 shadow-xs overflow-hidden cursor-context-menu",
+                                        msg.fromMe ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-card dark:bg-card border border-border/60 dark:border-border/80 text-foreground rounded-bl-sm"
                                     )} onContextMenu={(e) => handleContextMenu(e, msg)}>
                                         {!msg.fromMe && jid.endsWith("@g.us") && msg.pushName && (
                                             <span className="text-[10px] font-semibold text-primary block mb-0.5">{msg.pushName}</span>
@@ -2622,7 +2622,7 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
             )}
 
             {/* Input */}
-            <div className="shrink-0 px-3 py-2 bg-background/80 backdrop-blur-sm border-t space-y-1.5">
+            <div className="shrink-0 px-3 py-2.5 bg-card/80 dark:bg-card/90 backdrop-blur-md border-t border-border/50 space-y-1.5">
                 {/* Operator signature control bar */}
                 <div className="flex items-center justify-between px-1 text-xs">
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -2936,11 +2936,11 @@ export function ChatWindow({ sessionId, jid, name, initialAttendance, onBack }: 
                                             <button onClick={() => setReplyingTo(null)} className="p-0.5 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"><X className="h-3 w-3" /></button>
                                         </div>
                                     )}
-                                    <div className="flex items-end gap-1 p-1 rounded-2xl border border-border/30 bg-background shadow-sm">
+                                    <div className="flex items-end gap-1 p-1 rounded-2xl border border-border/70 dark:border-border/90 bg-card dark:bg-card shadow-xs focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20 transition-all">
                                         <EmojiPicker onSelectEmoji={handleInsertEmoji} />
                                         <textarea ref={inputRef} value={input} onChange={handleInputChange}
                                             onKeyDown={handleKeyDown} placeholder="Digite uma mensagem ou / para respostas rápidas..." rows={1} style={{ minHeight: "36px", maxHeight: "120px" }}
-                                            className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground placeholder-muted-foreground focus:outline-none leading-normal" />
+                                            className="flex-1 resize-none bg-transparent px-2.5 py-1.5 text-sm font-normal text-foreground placeholder:text-muted-foreground focus:outline-none leading-normal" />
                                     </div>
                                 </div>
 
