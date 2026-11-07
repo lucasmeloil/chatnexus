@@ -120,12 +120,12 @@ export function MobileNav({ appName = "NEXUS CHAT" }: { appName?: string }) {
                         <img 
                             src="/nexus-chat-logo.png" 
                             alt="NEXUS CHAT" 
-                            className="h-8 w-auto object-contain dark:hidden" 
+                            className="h-[34px] w-auto object-contain dark:hidden" 
                         />
                         <img 
                             src="/nexus-chat-logo-white.png" 
                             alt="NEXUS CHAT" 
-                            className="h-8 w-auto object-contain hidden dark:block" 
+                            className="h-[34px] w-auto object-contain hidden dark:block" 
                         />
                     </div>
                 </SheetHeader>
