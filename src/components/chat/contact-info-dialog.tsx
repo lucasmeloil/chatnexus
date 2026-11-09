@@ -270,11 +270,12 @@ export function ContactInfoDialog({
             />
 
             <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
-                <DialogContent className="max-w-md w-full p-0 overflow-hidden bg-background border shadow-2xl rounded-2xl">
-                    {/* Header Banner */}
-                    <div className="relative h-28 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 flex items-end px-6 pb-0">
-                        <div className="absolute top-3 right-3 flex items-center gap-1">
-                            <Badge className="bg-black/30 backdrop-blur-md text-white/90 border-0 text-[10px] font-medium px-2 py-0.5">
+                <DialogContent className="max-w-md w-full p-0 overflow-hidden bg-background border shadow-2xl rounded-3xl">
+                    {/* Header Banner com gradiente moderno e badge no canto esquerdo */}
+                    <div className="relative h-28 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 flex items-start px-6 pt-3.5">
+                        <div className="flex items-center gap-1.5 z-10">
+                            <Badge className="bg-black/40 backdrop-blur-md text-white border border-white/10 text-[11px] font-medium px-3 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                                 WhatsApp Conectado
                             </Badge>
                         </div>
@@ -357,53 +358,63 @@ export function ContactInfoDialog({
 
                         {/* Name & Save / Edit Contact Section */}
                         {isEditingName ? (
-                            <div className="space-y-2.5 p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 animate-in fade-in">
+                            <div className="space-y-3 p-4 rounded-2xl border border-blue-500/30 bg-gradient-to-b from-blue-500/10 to-blue-500/5 shadow-sm animate-in fade-in">
                                 <div className="flex items-center justify-between">
-                                    <label className="text-[11px] font-semibold uppercase text-blue-600 dark:text-blue-400 tracking-wider block">
+                                    <label className="text-[11px] font-bold uppercase text-blue-600 dark:text-blue-400 tracking-wider flex items-center gap-1.5">
+                                        <Pencil className="h-3.5 w-3.5" />
                                         {isContactSaved ? "Editar Nome do Contato" : "Cadastrar Novo Contato"}
                                     </label>
                                     {!isContactSaved && (
-                                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25">
                                             Não Salvo
                                         </span>
                                     )}
                                 </div>
-                                <div className="space-y-2">
-                                    <Input
-                                        value={nameInput}
-                                        onChange={e => setNameInput(e.target.value)}
-                                        placeholder="Nome ou Empresa (ex: João Silva / RR Autos)"
-                                        className="h-9 text-sm bg-background border-border/80"
-                                        autoFocus
-                                        onKeyDown={e => {
-                                            if (e.key === "Enter" && !e.shiftKey) {
-                                                e.preventDefault();
-                                                handleSaveContact();
-                                            }
-                                            if (e.key === "Escape") setIsEditingName(false);
-                                        }}
-                                    />
-                                    <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-2.5">
+                                    <div>
+                                        <span className="text-[11px] font-medium text-muted-foreground block mb-1">Nome ou Loja / Empresa *</span>
                                         <Input
-                                            value={tagInput}
-                                            onChange={e => setTagInput(e.target.value)}
-                                            placeholder="Setor / Tag (ex: Comercial)"
-                                            className="h-8 text-xs bg-background border-border/80"
-                                        />
-                                        <Input
-                                            value={notesInput}
-                                            onChange={e => setNotesInput(e.target.value)}
-                                            placeholder="Observação (opcional)"
-                                            className="h-8 text-xs bg-background border-border/80"
+                                            value={nameInput}
+                                            onChange={e => setNameInput(e.target.value)}
+                                            placeholder="Ex: João Silva / Loja Bella Moda"
+                                            className="h-10 text-sm bg-background border-border/80 rounded-xl focus-visible:ring-blue-500 font-medium"
+                                            autoFocus
+                                            onKeyDown={e => {
+                                                if (e.key === "Enter" && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    handleSaveContact();
+                                                }
+                                                if (e.key === "Escape") setIsEditingName(false);
+                                            }}
                                         />
                                     </div>
+                                    <div className="grid grid-cols-2 gap-2.5">
+                                        <div>
+                                            <span className="text-[11px] font-medium text-muted-foreground block mb-1">Setor / Tag</span>
+                                            <Input
+                                                value={tagInput}
+                                                onChange={e => setTagInput(e.target.value)}
+                                                placeholder="Ex: Comercial, Suporte"
+                                                className="h-9 text-xs bg-background border-border/80 rounded-xl"
+                                            />
+                                        </div>
+                                        <div>
+                                            <span className="text-[11px] font-medium text-muted-foreground block mb-1">Observações</span>
+                                            <Input
+                                                value={notesInput}
+                                                onChange={e => setNotesInput(e.target.value)}
+                                                placeholder="Ex: Lojista Itabaiana"
+                                                className="h-9 text-xs bg-background border-border/80 rounded-xl"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="flex items-center justify-end gap-2 pt-1">
+                                <div className="flex items-center justify-end gap-2 pt-1 border-t border-blue-500/20">
                                     <Button
                                         size="sm"
                                         variant="ghost"
                                         onClick={() => setIsEditingName(false)}
-                                        className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                                        className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground rounded-xl"
                                     >
                                         Cancelar
                                     </Button>
@@ -411,9 +422,9 @@ export function ContactInfoDialog({
                                         size="sm"
                                         onClick={handleSaveContact}
                                         disabled={isSavingName || !nameInput.trim()}
-                                        className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-xs"
+                                        className="h-8 px-4 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm gap-1.5"
                                     >
-                                        {isSavingName ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Save className="h-3.5 w-3.5 mr-1" />}
+                                        {isSavingName ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                                         Salvar Contato
                                     </Button>
                                 </div>
@@ -434,29 +445,37 @@ export function ContactInfoDialog({
                                             setNameInput(isContactSaved ? currentName : "");
                                             setIsEditingName(true);
                                         }}
-                                        className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+                                        className="h-8 px-2.5 text-xs gap-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 rounded-xl shrink-0 cursor-pointer font-medium"
                                     >
-                                        <Pencil className="h-3 w-3" />
+                                        <Pencil className="h-3.5 w-3.5" />
                                         <span>{isContactSaved ? "Editar Nome" : "Salvar Nome"}</span>
                                     </Button>
                                 </div>
-                                <p className="text-xs text-muted-foreground flex items-center gap-1 font-mono">
-                                    <span>ID:</span>
-                                    <span className="select-all">{canonicalJid}</span>
-                                </p>
+                                <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono bg-muted/40 px-2.5 py-1 rounded-lg w-fit border border-border/40">
+                                    <span className="text-[10px] uppercase font-bold text-muted-foreground/70">ID</span>
+                                    <span className="select-all truncate max-w-[280px]">{canonicalJid}</span>
+                                    <button 
+                                        type="button"
+                                        onClick={() => handleCopy(canonicalJid, "ID")}
+                                        className="text-muted-foreground hover:text-foreground p-0.5"
+                                        title="Copiar ID"
+                                    >
+                                        <Copy className="h-3 w-3" />
+                                    </button>
+                                </div>
                             </div>
                         )}
 
                         {/* If contact is not saved yet, show prominent "Adicionar Contato" helper */}
                         {!isContactSaved && !isEditingName && (
-                            <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-3 flex items-center justify-between gap-3">
+                            <div className="rounded-2xl border border-blue-500/30 bg-gradient-to-r from-blue-500/10 via-indigo-500/5 to-purple-500/10 p-3.5 flex items-center justify-between gap-3 shadow-xs">
                                 <div className="space-y-0.5 min-w-0">
-                                    <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-                                        <UserPlus className="h-3.5 w-3.5 shrink-0" />
+                                    <p className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                                        <UserPlus className="h-4 w-4 shrink-0" />
                                         Contato não cadastrado
                                     </p>
                                     <p className="text-[11px] text-muted-foreground leading-tight">
-                                        Salve o nome ou empresa para facilitar o atendimento.
+                                        Salve o nome do cliente ou loja para identificação no chat.
                                     </p>
                                 </div>
                                 <Button
@@ -465,53 +484,53 @@ export function ContactInfoDialog({
                                         setNameInput("");
                                         setIsEditingName(true);
                                     }}
-                                    className="h-8 px-3 text-xs bg-blue-600 hover:bg-blue-700 text-white shrink-0 font-medium cursor-pointer"
+                                    className="h-8 px-3.5 text-xs bg-blue-600 hover:bg-blue-700 text-white shrink-0 font-semibold rounded-xl shadow-xs cursor-pointer"
                                 >
-                                    Adicionar Contato
+                                    Salvar Contato
                                 </Button>
                             </div>
                         )}
 
-                        {/* Quick Contact Info Box */}
-                        <div className="rounded-xl border border-border/60 bg-muted/30 p-3.5 space-y-3">
+                        {/* Quick Contact Info Box com design moderno */}
+                        <div className="rounded-2xl border border-border/70 bg-gradient-to-b from-card/90 to-muted/40 p-4 space-y-3.5 shadow-xs">
                             {/* Phone with copy */}
-                            <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                    <div className="h-8 w-8 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                                        <Phone className="h-4 w-4" />
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="h-9 w-9 rounded-xl bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 shadow-2xs">
+                                        <Phone className="h-4.5 w-4.5" />
                                     </div>
                                     <div className="min-w-0">
-                                        <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Número WhatsApp</p>
-                                        <p className="text-sm font-semibold text-foreground font-mono">{formattedPhone}</p>
+                                        <p className="text-[10px] uppercase font-bold text-muted-foreground/80 tracking-wider">Número WhatsApp</p>
+                                        <p className="text-sm font-bold text-foreground font-mono tracking-tight">{formattedPhone}</p>
                                     </div>
                                 </div>
                                 <Button
                                     variant="outline"
                                     size="sm"
-                                    className="h-8 px-2.5 text-xs gap-1.5 rounded-lg border-border/80 hover:bg-background shrink-0"
+                                    className="h-8 px-3 text-xs gap-1.5 rounded-xl border-border/80 hover:bg-background shrink-0 font-medium cursor-pointer"
                                     onClick={() => handleCopy(cleanNumber, "Número")}
                                 >
                                     {copiedField === "Número" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
-                                    <span>{copiedField === "Número" ? "Copiado" : "Copiar"}</span>
+                                    <span>{copiedField === "Número" ? "Copiado!" : "Copiar"}</span>
                                 </Button>
                             </div>
 
                             {/* Direct WhatsApp Web Link */}
-                            <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/40">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                    <div className="h-8 w-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-                                        <Share2 className="h-4 w-4" />
+                            <div className="flex items-center justify-between gap-3 pt-3 border-t border-border/50">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className="h-9 w-9 rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 shadow-2xs">
+                                        <Share2 className="h-4.5 w-4.5" />
                                     </div>
                                     <div className="min-w-0">
-                                        <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">Link Direto (wa.me)</p>
-                                        <p className="text-xs text-muted-foreground truncate">{waLink}</p>
+                                        <p className="text-[10px] uppercase font-bold text-muted-foreground/80 tracking-wider">Link Direto (wa.me)</p>
+                                        <p className="text-xs text-muted-foreground truncate font-mono">{waLink}</p>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-1 shrink-0">
+                                <div className="flex items-center gap-1.5 shrink-0">
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        className="h-8 px-2 text-xs rounded-lg"
+                                        className="h-8 px-2.5 text-xs rounded-xl"
                                         onClick={() => handleCopy(waLink, "Link WhatsApp")}
                                         title="Copiar link wa.me"
                                     >
@@ -520,7 +539,7 @@ export function ContactInfoDialog({
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        className="h-8 px-2.5 text-xs gap-1 rounded-lg text-emerald-600 hover:bg-emerald-500/10 border-emerald-500/30"
+                                        className="h-8 px-3 text-xs gap-1 rounded-xl text-emerald-600 hover:bg-emerald-500/10 border-emerald-500/30 font-semibold cursor-pointer"
                                         onClick={() => window.open(waLink, "_blank")}
                                         title="Abrir no WhatsApp Oficial"
                                     >

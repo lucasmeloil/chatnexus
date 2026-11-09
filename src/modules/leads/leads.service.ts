@@ -432,6 +432,32 @@ export class LeadsService {
         return Number(res) > 0;
     }
 
+    static async deleteLeadsBatch(ids: string[]): Promise<number> {
+        await this.ensureTables();
+        if (!ids || ids.length === 0) return 0;
+
+        const placeholders = ids.map(() => "?").join(", ");
+
+        await prisma.$executeRawUnsafe(
+            `DELETE FROM \`NexusLeadActivity\` WHERE leadId IN (${placeholders})`,
+            ...ids
+        );
+
+        const res = await prisma.$executeRawUnsafe(
+            `DELETE FROM \`NexusLead\` WHERE id IN (${placeholders})`,
+            ...ids
+        );
+
+        return Number(res) || 0;
+    }
+
+    static async deleteAllLeads(): Promise<number> {
+        await this.ensureTables();
+        await prisma.$executeRawUnsafe(`DELETE FROM \`NexusLeadActivity\``);
+        const res = await prisma.$executeRawUnsafe(`DELETE FROM \`NexusLead\``);
+        return Number(res) || 0;
+    }
+
     static async addActivity(leadId: string, activity: CreateActivityDTO): Promise<NexusLeadActivityRecord> {
         await this.ensureTables();
 

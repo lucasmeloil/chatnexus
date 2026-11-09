@@ -36,7 +36,13 @@ import {
     Upload,
     Download,
     FileText,
-    AlertTriangle
+    AlertTriangle,
+    CheckSquare,
+    Square,
+    Send,
+    Image as ImageIcon,
+    Radio,
+    Megaphone
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -53,6 +59,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { useSession } from "@/components/dashboard/session-provider";
 
 export interface NexusLead {
     id: string;
@@ -165,8 +172,25 @@ const STATUS_CONFIG: Record<NexusLead["status"], { label: string; badgeClass: st
     }
 };
 
+const DEFAULT_LEAD_BROADCAST_MESSAGE = `Olá *{{dono}}*, tudo bem? Espero que sim! 👋
+
+Aqui é da equipe comercial da *Nexus Soft Tech* em Itabaiana/SE!
+
+Identificamos uma excelente oportunidade para otimizar o atendimento e a gestão da *{{empresa}}* com as nossas soluções empresariais:
+✅ Controle de Estoque rápido e inteligente
+✅ Frente de Caixa (PDV) ágil com emissão fiscal (NFC-e / NF-e)
+✅ Gestão Financeira com DRE e Contas a Pagar/Receber
+✅ Suporte e implantação presencial e online dedicada ao lojista
+
+Gostaria de agendar uma breve demonstração de 10 minutinhos sem compromisso para você ver na prática?
+
+_Segue em anexo nossa apresentação._
+Fico no aguardo do seu retorno! 🚀`;
+
 export default function LeadsPage() {
     const router = useRouter();
+    const { sessions, sessionId: currentSessionId } = useSession();
+
     const [leads, setLeads] = useState<NexusLead[]>([]);
     const [metrics, setMetrics] = useState<LeadMetrics>({
         total: 0,
@@ -177,6 +201,23 @@ export default function LeadsPage() {
         conversionRate: 0
     });
     const [loading, setLoading] = useState(true);
+
+    // Seleção em massa de Leads
+    const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+
+    // Modais de Exclusão em Lote
+    const [isDeleteBatchModalOpen, setIsDeleteBatchModalOpen] = useState(false);
+    const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
+    const [isDeletingLeads, setIsDeletingLeads] = useState(false);
+
+    // Modal de Disparo em Massa para Leads
+    const [isBroadcastModalOpen, setIsBroadcastModalOpen] = useState(false);
+    const [broadcastSessionId, setBroadcastSessionId] = useState("");
+    const [broadcastMessage, setBroadcastMessage] = useState(DEFAULT_LEAD_BROADCAST_MESSAGE);
+    const [broadcastImageFile, setBroadcastImageFile] = useState<File | null>(null);
+    const [broadcastImagePreview, setBroadcastImagePreview] = useState<string | null>(null);
+    const [broadcastDelaySeconds, setBroadcastDelaySeconds] = useState(3);
+    const [isSendingBroadcast, setIsSendingBroadcast] = useState(false);
 
     // Filtros
     const [search, setSearch] = useState("");
@@ -226,6 +267,41 @@ export default function LeadsPage() {
         newStatus: "" as NexusLead["status"] | "",
         nextContactAt: ""
     });
+
+    // Efeito para sincronizar a sessão de disparo com a sessão conectada
+    useEffect(() => {
+        if (!broadcastSessionId && currentSessionId) {
+            setBroadcastSessionId(currentSessionId);
+        } else if (!broadcastSessionId && sessions.length > 0) {
+            const connected = sessions.find(s => s.status === "CONNECTED") || sessions[0];
+            if (connected) setBroadcastSessionId(connected.sessionId);
+        }
+    }, [currentSessionId, sessions, broadcastSessionId]);
+
+    // Helpers de seleção de leads
+    const toggleSelectLead = (id: string) => {
+        setSelectedLeadIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            return next;
+        });
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedLeadIds.size === leads.length && leads.length > 0) {
+            setSelectedLeadIds(new Set());
+        } else {
+            setSelectedLeadIds(new Set(leads.map(l => l.id)));
+        }
+    };
+
+    const clearSelection = () => {
+        setSelectedLeadIds(new Set());
+    };
 
     const loadLeads = async () => {
         setLoading(true);
@@ -471,6 +547,152 @@ export default function LeadsPage() {
             }
         } catch {
             toast.error("Erro ao excluir lead");
+        }
+    };
+
+    // Excluir Leads Selecionados (Batch)
+    const handleConfirmDeleteSelected = async () => {
+        if (selectedLeadIds.size === 0) return;
+        setIsDeletingLeads(true);
+        try {
+            const res = await fetch("/api/leads", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ids: Array.from(selectedLeadIds) })
+            });
+            const json = await res.json();
+            if (json.status) {
+                toast.success(`${json.data?.count ?? selectedLeadIds.size} leads excluídos com sucesso!`);
+                setSelectedLeadIds(new Set());
+                setIsDeleteBatchModalOpen(false);
+                loadLeads();
+            } else {
+                toast.error(json.message || "Erro ao excluir leads selecionados");
+            }
+        } catch {
+            toast.error("Erro ao excluir leads");
+        } finally {
+            setIsDeletingLeads(false);
+        }
+    };
+
+    // Excluir TODOS os Leads
+    const handleConfirmDeleteAll = async () => {
+        setIsDeletingLeads(true);
+        try {
+            const res = await fetch("/api/leads", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ all: true })
+            });
+            const json = await res.json();
+            if (json.status) {
+                toast.success(`Todos os leads (${json.data?.count ?? 0}) foram removidos da base!`);
+                setSelectedLeadIds(new Set());
+                setIsDeleteAllModalOpen(false);
+                loadLeads();
+            } else {
+                toast.error(json.message || "Erro ao excluir todos os leads");
+            }
+        } catch {
+            toast.error("Erro ao limpar base de leads");
+        } finally {
+            setIsDeletingLeads(false);
+        }
+    };
+
+    // Abrir Modal de Disparo
+    const handleOpenBroadcastModal = () => {
+        if (selectedLeadIds.size === 0) {
+            setSelectedLeadIds(new Set(leads.map(l => l.id)));
+        }
+        setIsBroadcastModalOpen(true);
+    };
+
+    // Imagem do Disparo
+    const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            toast.error("Por favor, selecione um arquivo de imagem (PNG, JPG, WebP)");
+            return;
+        }
+        setBroadcastImageFile(file);
+        setBroadcastImagePreview(URL.createObjectURL(file));
+    };
+
+    const handleRemoveImage = () => {
+        setBroadcastImageFile(null);
+        if (broadcastImagePreview) {
+            URL.revokeObjectURL(broadcastImagePreview);
+            setBroadcastImagePreview(null);
+        }
+    };
+
+    // Executar Disparo em Massa
+    const handleExecuteBroadcast = async () => {
+        const targetLeads = leads.filter(l => selectedLeadIds.has(l.id));
+        if (targetLeads.length === 0) {
+            toast.warning("Selecione pelo menos 1 lead para disparar");
+            return;
+        }
+
+        const activeSession = broadcastSessionId || currentSessionId;
+        if (!activeSession) {
+            toast.warning("Selecione uma sessão do WhatsApp conectada");
+            return;
+        }
+
+        if (!broadcastMessage.trim() && !broadcastImageFile) {
+            toast.warning("Digite uma mensagem ou anexe uma imagem para o disparo");
+            return;
+        }
+
+        setIsSendingBroadcast(true);
+        try {
+            const recipients: string[] = [];
+            const customMessages: string[] = [];
+
+            for (const lead of targetLeads) {
+                const rawPhone = lead.phone.replace(/\D/g, "");
+                const fullPhone = rawPhone.startsWith("55") ? rawPhone : `55${rawPhone}`;
+                recipients.push(`${fullPhone}@s.whatsapp.net`);
+
+                const customized = broadcastMessage
+                    .replace(/{{dono}}/gi, lead.ownerName || "Amigo(a)")
+                    .replace(/{{empresa}}/gi, lead.companyName || "sua empresa");
+                customMessages.push(customized);
+            }
+
+            const formData = new FormData();
+            formData.append("mode", "standard");
+            formData.append("delay", String(broadcastDelaySeconds * 1000));
+            formData.append("recipients", JSON.stringify(recipients));
+            formData.append("message", broadcastMessage);
+            formData.append("customMessages", JSON.stringify(customMessages));
+
+            if (broadcastImageFile) {
+                formData.append("file", broadcastImageFile);
+            }
+
+            const res = await fetch(`/api/messages/${activeSession}/broadcast`, {
+                method: "POST",
+                body: formData
+            });
+
+            const json = await res.json();
+            if (json.status) {
+                toast.success(`Disparo iniciado para ${recipients.length} leads com sucesso!`);
+                setIsBroadcastModalOpen(false);
+                handleRemoveImage();
+            } else {
+                toast.error(json.message || "Erro ao iniciar disparo para os leads");
+            }
+        } catch (e) {
+            console.error("Broadcast error:", e);
+            toast.error("Erro ao enviar disparo para os leads");
+        } finally {
+            setIsSendingBroadcast(false);
         }
     };
 
@@ -935,6 +1157,83 @@ export default function LeadsPage() {
                 )}
             </div>
 
+            {/* Barra de Ações em Lote e Seleção de Leads */}
+            {!loading && leads.length > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-card/80 border border-border/70 backdrop-blur-md shadow-xs">
+                    <div className="flex items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={toggleSelectAll}
+                            className="flex items-center gap-2 text-xs font-semibold text-foreground hover:text-primary transition-colors cursor-pointer select-none"
+                        >
+                            <div className={`h-5 w-5 rounded-md border flex items-center justify-center transition-all ${
+                                leads.length > 0 && selectedLeadIds.size === leads.length
+                                    ? "bg-primary border-primary text-primary-foreground shadow-xs"
+                                    : selectedLeadIds.size > 0
+                                    ? "bg-primary/20 border-primary text-primary"
+                                    : "border-border hover:border-primary/60 bg-background"
+                            }`}>
+                                {leads.length > 0 && selectedLeadIds.size === leads.length ? (
+                                    <Check className="h-3.5 w-3.5 stroke-[3]" />
+                                ) : selectedLeadIds.size > 0 ? (
+                                    <div className="w-2 h-0.5 bg-primary rounded-full" />
+                                ) : null}
+                            </div>
+                            <span>
+                                {selectedLeadIds.size === leads.length && leads.length > 0
+                                    ? "Desmarcar Todos"
+                                    : `Selecionar Todos (${leads.length})`}
+                            </span>
+                        </button>
+
+                        {selectedLeadIds.size > 0 && (
+                            <Badge variant="secondary" className="rounded-lg text-xs font-bold px-2.5 py-0.5 bg-primary/10 text-primary border border-primary/20">
+                                {selectedLeadIds.size} selecionado{selectedLeadIds.size > 1 ? "s" : ""}
+                            </Badge>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                        {/* Botão de Disparo para Leads */}
+                        <Button
+                            onClick={handleOpenBroadcastModal}
+                            size="sm"
+                            className="h-9 px-3.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm gap-1.5 cursor-pointer"
+                            title="Enviar mensagem e imagem via WhatsApp para os leads selecionados"
+                        >
+                            <Send className="h-3.5 w-3.5" />
+                            Disparo para {selectedLeadIds.size > 0 ? `${selectedLeadIds.size} Leads` : "Todos os Leads"}
+                        </Button>
+
+                        {/* Botão Excluir Selecionados */}
+                        {selectedLeadIds.size > 0 && (
+                            <Button
+                                onClick={() => setIsDeleteBatchModalOpen(true)}
+                                size="sm"
+                                variant="outline"
+                                className="h-9 px-3 text-xs font-semibold rounded-xl border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/10 gap-1.5 cursor-pointer"
+                                title="Excluir apenas os leads selecionados"
+                            >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Excluir Selecionados ({selectedLeadIds.size})
+                            </Button>
+                        )}
+
+                        {/* Botão Excluir Todos os Leads da Base */}
+                        <Button
+                            onClick={() => setIsDeleteAllModalOpen(true)}
+                            size="sm"
+                            variant="ghost"
+                            className="h-9 px-2.5 text-xs font-medium text-muted-foreground hover:text-red-600 hover:bg-red-500/10 rounded-xl gap-1.5 cursor-pointer"
+                            title="Limpar todos os leads cadastrados na base"
+                        >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Excluir Todos da Base
+                        </Button>
+                    </div>
+                </div>
+            )}
+
             {/* Listagem de Leads */}
             {loading ? (
                 <div className="flex flex-col items-center justify-center py-20 space-y-3">
@@ -962,26 +1261,44 @@ export default function LeadsPage() {
                     {leads.map((lead) => {
                         const statusInfo = STATUS_CONFIG[lead.status] || STATUS_CONFIG.NOVO;
                         const urgency = getContactUrgency(lead.nextContactAt, lead.status);
+                        const isSelected = selectedLeadIds.has(lead.id);
 
                         return (
                             <Card
                                 key={lead.id}
-                                className={`rounded-2xl border border-border/70 shadow-sm transition-all hover:shadow-md bg-card/90 overflow-hidden border-l-4 ${statusInfo.borderClass}`}
+                                className={`rounded-2xl border transition-all hover:shadow-md bg-card/90 overflow-hidden border-l-4 ${statusInfo.borderClass} ${
+                                    isSelected 
+                                        ? "ring-2 ring-primary border-primary/70 bg-primary/5 shadow-md" 
+                                        : "border-border/70 shadow-sm"
+                                }`}
                             >
                                 <CardHeader className="p-4 pb-2.5 space-y-2">
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div className="space-y-0.5 flex-1 min-w-0">
-                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                    <div className="flex items-start justify-between gap-2.5">
+                                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleSelectLead(lead.id)}
+                                                className={`mt-0.5 h-5 w-5 rounded-md border flex items-center justify-center shrink-0 transition-all cursor-pointer ${
+                                                    isSelected
+                                                        ? "bg-primary border-primary text-primary-foreground shadow-xs"
+                                                        : "border-border/80 hover:border-primary/60 bg-background/80"
+                                                }`}
+                                                title={isSelected ? "Desmarcar lead" : "Selecionar lead"}
+                                            >
+                                                {isSelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}
+                                            </button>
+
+                                            <div className="space-y-0.5 min-w-0 flex-1">
                                                 <h3 className="font-bold text-base tracking-tight truncate" title={lead.companyName}>
                                                     {lead.companyName}
                                                 </h3>
-                                            </div>
-                                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                                <User className="h-3.5 w-3.5 text-primary/80 shrink-0" />
-                                                <span className="font-medium text-foreground/90 truncate">{lead.ownerName}</span>
-                                                <span className="text-muted-foreground/60">•</span>
-                                                <MapPin className="h-3.5 w-3.5 shrink-0" />
-                                                <span>{lead.city || "Itabaiana"}-{lead.state || "SE"}</span>
+                                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                                    <User className="h-3.5 w-3.5 text-primary/80 shrink-0" />
+                                                    <span className="font-medium text-foreground/90 truncate">{lead.ownerName}</span>
+                                                    <span className="text-muted-foreground/60">•</span>
+                                                    <MapPin className="h-3.5 w-3.5 shrink-0" />
+                                                    <span>{lead.city || "Itabaiana"}-{lead.state || "SE"}</span>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -1877,6 +2194,311 @@ export default function LeadsPage() {
                                     <>
                                         <Check className="h-4 w-4" />
                                         Confirmar Importação de {parsedLeads.length} Leads
+                                    </>
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* MODAL: CONFIRMAR EXCLUSÃO DE LEADS SELECIONADOS */}
+            <Dialog open={isDeleteBatchModalOpen} onOpenChange={setIsDeleteBatchModalOpen}>
+                <DialogContent className="max-w-md rounded-2xl p-6">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-lg font-bold text-red-600 dark:text-red-400">
+                            <Trash2 className="h-5 w-5" />
+                            Excluir Leads Selecionados
+                        </DialogTitle>
+                        <DialogDescription className="pt-2 text-sm leading-relaxed text-foreground/80">
+                            Você tem certeza que deseja excluir os <strong>{selectedLeadIds.size} leads</strong> selecionados?
+                            <br /><br />
+                            <span className="text-muted-foreground text-xs">
+                                Esta ação removerá os cadastros e históricos associados. Essa ação não pode ser desfeita.
+                            </span>
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <DialogFooter className="pt-4 gap-2 sm:gap-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsDeleteBatchModalOpen(false)}
+                            disabled={isDeletingLeads}
+                            className="rounded-xl"
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={handleConfirmDeleteSelected}
+                            disabled={isDeletingLeads}
+                            className="rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold gap-1.5"
+                        >
+                            {isDeletingLeads ? (
+                                <>
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                    Excluindo...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="h-4 w-4" />
+                                    Excluir {selectedLeadIds.size} Leads
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* MODAL: CONFIRMAR EXCLUSÃO DE TODOS OS LEADS DA BASE */}
+            <Dialog open={isDeleteAllModalOpen} onOpenChange={setIsDeleteAllModalOpen}>
+                <DialogContent className="max-w-md rounded-2xl p-6 border-red-500/40">
+                    <DialogHeader>
+                        <div className="mx-auto w-12 h-12 rounded-2xl bg-red-500/15 text-red-600 flex items-center justify-center mb-2">
+                            <AlertTriangle className="h-6 w-6" />
+                        </div>
+                        <DialogTitle className="text-center text-xl font-bold text-red-600 dark:text-red-400">
+                            Excluir TODOS os Leads?
+                        </DialogTitle>
+                        <DialogDescription className="text-center pt-2 text-sm leading-relaxed text-foreground/80">
+                            Atenção: Você está prestes a apagar <strong>todos os {metrics.total} leads</strong> da base comercial da Nexus Soft Tech.
+                            <br /><br />
+                            <span className="text-xs text-red-500/90 font-medium block bg-red-500/10 p-2.5 rounded-xl border border-red-500/20">
+                                ⚠️ Todos os contatos, status, notas e históricos de prospecção serão permanentemente apagados.
+                            </span>
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <DialogFooter className="pt-4 gap-2 sm:gap-0">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsDeleteAllModalOpen(false)}
+                            disabled={isDeletingLeads}
+                            className="rounded-xl"
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={handleConfirmDeleteAll}
+                            disabled={isDeletingLeads}
+                            className="rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold gap-1.5 shadow-md"
+                        >
+                            {isDeletingLeads ? (
+                                <>
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                    Apagando base...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="h-4 w-4" />
+                                    Sim, Excluir Todos Definitivamente
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* MODAL: DISPARO EM MASSA COM MENSAGEM E IMAGEM PARA LEADS */}
+            <Dialog open={isBroadcastModalOpen} onOpenChange={setIsBroadcastModalOpen}>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-6">
+                    <DialogHeader>
+                        <div className="flex items-center gap-3">
+                            <div className="p-3 rounded-2xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                                <Megaphone className="h-6 w-6" />
+                            </div>
+                            <div>
+                                <DialogTitle className="text-xl font-bold">
+                                    Disparo em Massa para Leads
+                                </DialogTitle>
+                                <DialogDescription className="text-xs">
+                                    Envie uma mensagem personalizada e imagem via WhatsApp diretamente para os lojistas captados.
+                                </DialogDescription>
+                            </div>
+                        </div>
+                    </DialogHeader>
+
+                    <div className="space-y-4 pt-3">
+                        {/* Indicador de Destinatários */}
+                        <div className="flex items-center justify-between p-3 rounded-2xl bg-muted/40 border border-border/60 text-xs">
+                            <div className="flex items-center gap-2">
+                                <span className="font-semibold text-foreground">Destinatários:</span>
+                                <Badge className="bg-emerald-600 text-white font-bold text-xs px-2.5 py-0.5">
+                                    {selectedLeadIds.size} lojistas selecionados
+                                </Badge>
+                            </div>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={toggleSelectAll}
+                                className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                            >
+                                {selectedLeadIds.size === leads.length ? "Desmarcar todos" : "Selecionar todos"}
+                            </Button>
+                        </div>
+
+                        {/* Seletor de Sessão do WhatsApp */}
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                                <Radio className="h-3.5 w-3.5 text-primary" />
+                                Sessão do WhatsApp para Envio:
+                            </label>
+                            <select
+                                value={broadcastSessionId}
+                                onChange={(e) => setBroadcastSessionId(e.target.value)}
+                                className="w-full h-10 px-3 rounded-xl border border-border/70 bg-background text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                                {sessions.map((sess) => (
+                                    <option key={sess.sessionId} value={sess.sessionId}>
+                                        {sess.name} ({sess.status === "CONNECTED" ? "🟢 Conectado" : "🔴 Desconectado"})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Campo de Mensagem */}
+                        <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-semibold text-foreground">
+                                    Mensagem de Prospecção:
+                                </label>
+                                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                    <span>Tags automáticas:</span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setBroadcastMessage(prev => prev + " {{dono}}")}
+                                        className="px-2 py-0.5 rounded-md bg-primary/10 text-primary font-bold hover:bg-primary/20 transition-colors"
+                                        title="Inserir nome do dono do lead"
+                                    >
+                                        {"{{dono}}"}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setBroadcastMessage(prev => prev + " {{empresa}}")}
+                                        className="px-2 py-0.5 rounded-md bg-primary/10 text-primary font-bold hover:bg-primary/20 transition-colors"
+                                        title="Inserir nome da empresa do lead"
+                                    >
+                                        {"{{empresa}}"}
+                                    </button>
+                                </div>
+                            </div>
+                            <Textarea
+                                value={broadcastMessage}
+                                onChange={(e) => setBroadcastMessage(e.target.value)}
+                                rows={7}
+                                placeholder="Digite a mensagem que será enviada para cada lead..."
+                                className="rounded-2xl bg-background border-border/70 text-xs leading-relaxed resize-none font-sans"
+                            />
+                            <p className="text-[11px] text-muted-foreground">
+                                As tags <code>{"{{dono}}"}</code> e <code>{"{{empresa}}"}</code> serão substituídas automaticamente pelo nome e loja de cada lojista.
+                            </p>
+                        </div>
+
+                        {/* Upload de Imagem de Anexo */}
+                        <div className="space-y-2 p-3.5 rounded-2xl bg-muted/30 border border-border/60">
+                            <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                                <ImageIcon className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                                Anexo de Imagem (Opcional):
+                            </label>
+
+                            {broadcastImagePreview ? (
+                                <div className="flex items-center gap-3 p-2 bg-background rounded-xl border border-border/70">
+                                    <img
+                                        src={broadcastImagePreview}
+                                        alt="Prévia do Envio"
+                                        className="h-16 w-16 object-cover rounded-lg border border-border/50 shadow-2xs"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-semibold text-foreground truncate">
+                                            {broadcastImageFile?.name}
+                                        </p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            {((broadcastImageFile?.size || 0) / 1024).toFixed(1)} KB • A imagem será enviada com a mensagem acima como legenda (caption).
+                                        </p>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={handleRemoveImage}
+                                        className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-500/10 rounded-lg shrink-0"
+                                        title="Remover imagem"
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            ) : (
+                                <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-border/80 rounded-xl hover:border-emerald-500/60 hover:bg-emerald-500/5 transition-all cursor-pointer">
+                                    <ImageIcon className="h-6 w-6 text-muted-foreground mb-1" />
+                                    <span className="text-xs font-semibold text-foreground">
+                                        Clique para anexar imagem (banner, panfleto, foto de sistemas)
+                                    </span>
+                                    <span className="text-[11px] text-muted-foreground mt-0.5">
+                                        PNG, JPG, JPEG ou WebP
+                                    </span>
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleImageSelect}
+                                        className="hidden"
+                                    />
+                                </label>
+                            )}
+                        </div>
+
+                        {/* Intervalo / Delay de Segurança */}
+                        <div className="flex items-center justify-between p-3 rounded-2xl bg-muted/20 border border-border/50 text-xs">
+                            <div className="space-y-0.5">
+                                <span className="font-semibold text-foreground block">Intervalo anti-bloqueio entre envios:</span>
+                                <span className="text-[11px] text-muted-foreground">Recomendado para proteção da conta do WhatsApp.</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                                {[2, 3, 5, 8].map((sec) => (
+                                    <button
+                                        key={sec}
+                                        type="button"
+                                        onClick={() => setBroadcastDelaySeconds(sec)}
+                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                                            broadcastDelaySeconds === sec
+                                                ? "bg-primary text-primary-foreground shadow-xs"
+                                                : "bg-muted text-muted-foreground hover:text-foreground"
+                                        }`}
+                                    >
+                                        {sec}s
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <DialogFooter className="pt-3 gap-2 sm:gap-0 border-t border-border/50">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setIsBroadcastModalOpen(false)}
+                                disabled={isSendingBroadcast}
+                                className="rounded-xl h-11 px-5"
+                            >
+                                Cancelar
+                            </Button>
+                            <Button
+                                type="button"
+                                onClick={handleExecuteBroadcast}
+                                disabled={isSendingBroadcast || selectedLeadIds.size === 0}
+                                className="rounded-xl h-11 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md gap-2 cursor-pointer"
+                            >
+                                {isSendingBroadcast ? (
+                                    <>
+                                        <RefreshCw className="h-4 w-4 animate-spin" />
+                                        Iniciando Disparo...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Send className="h-4 w-4" />
+                                        Disparar para {selectedLeadIds.size} Leads
                                     </>
                                 )}
                             </Button>

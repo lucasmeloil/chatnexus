@@ -73,3 +73,43 @@ export async function POST(req: NextRequest) {
     }
 }
 
+export async function DELETE(req: NextRequest) {
+    try {
+        const user = await getAuthenticatedUser(req);
+        if (!user) {
+            return NextResponse.json({ status: false, message: "Não autorizado" }, { status: 401 });
+        }
+
+        const body = await req.json().catch(() => ({}));
+        const { ids, all } = body;
+
+        if (all) {
+            const count = await LeadsService.deleteAllLeads();
+            return NextResponse.json({
+                status: true,
+                message: `Todos os leads (${count}) foram excluídos com sucesso.`,
+                count
+            });
+        }
+
+        if (Array.isArray(ids) && ids.length > 0) {
+            const count = await LeadsService.deleteLeadsBatch(ids);
+            return NextResponse.json({
+                status: true,
+                message: `${count} leads foram excluídos com sucesso.`,
+                count
+            });
+        }
+
+        return NextResponse.json({
+            status: false,
+            message: "Nenhum lead especificado para exclusão"
+        }, { status: 400 });
+    } catch (e: any) {
+        return NextResponse.json({
+            status: false,
+            message: e.message || "Erro ao excluir leads"
+        }, { status: 500 });
+    }
+}
+
