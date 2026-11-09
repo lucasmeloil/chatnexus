@@ -32,6 +32,7 @@ import {
     Zap,
     UserPlus,
     Star,
+    Target,
 } from "lucide-react";
 import { useSidebar } from "./sidebar-context";
 import {
@@ -60,6 +61,7 @@ const navGroups: NavGroup[] = [
         label: "Principal",
         items: [
             { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+            { href: "/dashboard/leads", label: "Gestão de Leads", icon: Target },
             { href: "/dashboard/feedbacks", label: "Avaliações e Feedbacks", icon: Star },
             { href: "/dashboard/sessions", label: "Sessões / QR Code", icon: QrCode, superadminOnly: true },
         ],
