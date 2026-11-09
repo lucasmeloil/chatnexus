@@ -280,6 +280,55 @@ export class LeadsService {
         return created.lead!;
     }
 
+    static async importLeadsBatch(leads: CreateLeadDTO[]): Promise<{ imported: number; failed: number }> {
+        await this.ensureTables();
+        let imported = 0;
+        let failed = 0;
+
+        for (const data of leads) {
+            try {
+                if (!data.companyName?.trim() || !data.phone?.trim()) {
+                    failed++;
+                    continue;
+                }
+                const id = `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+                const now = new Date();
+                const capturedAtDate = data.capturedAt ? new Date(data.capturedAt) : now;
+
+                await prisma.$executeRawUnsafe(`
+                    INSERT INTO \`NexusLead\`
+                    (id, companyName, ownerName, phone, segment, systemOfInterest, currentSystem, posCount, city, state, status, capturedAt, lastContactAt, nextContactAt, notes, assignedTo, createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `,
+                    id,
+                    data.companyName.trim(),
+                    (data.ownerName?.trim() || "Responsável"),
+                    data.phone.trim(),
+                    data.segment || "Varejo em Geral",
+                    data.systemOfInterest || "ERP Completo Nexus (Estoque, Financeiro, Fiscal e Vendas)",
+                    data.currentSystem || "Nenhum / Anotações no Caderno",
+                    Number(data.posCount) || 1,
+                    data.city?.trim() || "Itabaiana",
+                    data.state?.trim() || "SE",
+                    data.status || "NOVO",
+                    this.formatDate(capturedAtDate),
+                    this.formatDate(data.lastContactAt),
+                    this.formatDate(data.nextContactAt),
+                    data.notes || "Importado via planilha Excel",
+                    data.assignedTo || null,
+                    this.formatDate(now),
+                    this.formatDate(now)
+                );
+                imported++;
+            } catch (err) {
+                logger.error("LeadsService", "Failed to import single lead", err);
+                failed++;
+            }
+        }
+
+        return { imported, failed };
+    }
+
     static async updateLead(id: string, data: UpdateLeadDTO): Promise<NexusLeadRecord | null> {
         await this.ensureTables();
 

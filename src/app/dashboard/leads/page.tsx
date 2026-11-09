@@ -31,8 +31,14 @@ import {
     CalendarCheck,
     Check,
     X,
-    Laptop
+    Laptop,
+    FileSpreadsheet,
+    Upload,
+    Download,
+    FileText,
+    AlertTriangle
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -183,6 +189,13 @@ export default function LeadsPage() {
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isContactModalOpen, setIsContactModalOpen] = useState(false);
     const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+    // Estado de Importação de Planilha Excel
+    const [parsedLeads, setParsedLeads] = useState<any[]>([]);
+    const [selectedFileName, setSelectedFileName] = useState("");
+    const [fileError, setFileError] = useState<string | null>(null);
+    const [importing, setImporting] = useState(false);
 
     // Lead selecionado
     const [selectedLead, setSelectedLead] = useState<NexusLead | null>(null);
@@ -528,6 +541,153 @@ export default function LeadsPage() {
         }
     };
 
+    // Leitura e mapeamento de arquivo Excel / CSV
+    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setSelectedFileName(file.name);
+        setFileError(null);
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: "binary" });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const data = XLSX.utils.sheet_to_json<any>(ws);
+
+                if (!data || data.length === 0) {
+                    setFileError("A planilha selecionada está vazia.");
+                    setParsedLeads([]);
+                    return;
+                }
+
+                // Mapeamento inteligente de colunas
+                const mappedLeads: any[] = [];
+                for (const row of data) {
+                    const getVal = (possibleKeys: string[]) => {
+                        for (const key of Object.keys(row)) {
+                            const cleanKey = key.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+                            for (const pk of possibleKeys) {
+                                const cleanPk = pk.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+                                if (cleanKey === cleanPk || cleanKey.includes(cleanPk)) {
+                                    return String(row[key] || "").trim();
+                                }
+                            }
+                        }
+                        return "";
+                    };
+
+                    const companyName = getVal(["empresa", "razaosocial", "nomefantasia", "loja", "nomeloja", "cliente", "company"]);
+                    const ownerName = getVal(["dono", "responsavel", "proprietario", "contato", "nome", "decisor", "owner"]);
+                    const phone = getVal(["whatsapp", "telefone", "celular", "fone", "tel", "phone", "numero"]);
+                    const segment = getVal(["segmento", "nicho", "ramo", "atividade", "tipo", "categoria"]);
+                    const city = getVal(["cidade", "municipio", "city"]);
+                    const state = getVal(["estado", "uf", "state"]);
+                    const currentSystem = getVal(["sistemaatual", "softwareatual", "sistema", "software"]);
+                    const systemOfInterest = getVal(["solucao", "interesse", "produtodeinteresse", "sistemadeinteresse"]);
+                    const posCountStr = getVal(["caixas", "pdvs", "pdv", "qtdcaixas"]);
+                    const notes = getVal(["observacoes", "observacao", "obs", "notas", "notes", "detalhes"]);
+
+                    if (companyName || phone) {
+                        mappedLeads.push({
+                            companyName: companyName || "Empresa sem nome",
+                            ownerName: ownerName || "Responsável",
+                            phone: phone || "",
+                            segment: segment || "Varejo em Geral",
+                            city: city || "Itabaiana",
+                            state: state || "SE",
+                            currentSystem: currentSystem || "Nenhum / Anotações no Caderno",
+                            systemOfInterest: systemOfInterest || "ERP Completo Nexus (Estoque, Financeiro, Fiscal e Vendas)",
+                            posCount: Number(posCountStr) || 1,
+                            notes: notes || "Importado via planilha Excel",
+                            status: "NOVO"
+                        });
+                    }
+                }
+
+                if (mappedLeads.length === 0) {
+                    setFileError("Não foi possível identificar colunas válidas como 'Empresa' ou 'Telefone' na planilha.");
+                    setParsedLeads([]);
+                } else {
+                    setParsedLeads(mappedLeads);
+                    toast.success(`${mappedLeads.length} leads identificados na planilha!`);
+                }
+            } catch (err: any) {
+                console.error("Erro ao ler Excel:", err);
+                setFileError("Erro ao processar arquivo. Certifique-se de que é um arquivo Excel (.xlsx, .xls) ou CSV válido.");
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
+    // Baixar planilha modelo (.xlsx)
+    const handleDownloadTemplate = () => {
+        const templateData = [
+            {
+                "Nome da Empresa": "Loja Bella Moda",
+                "Nome do Dono": "Carlos Silva",
+                "WhatsApp / Telefone": "(79) 99988-7766",
+                "Cidade": "Itabaiana",
+                "Estado": "SE",
+                "Segmento": "Confecções & Vestuário (Moda)",
+                "Sistema Atual": "Nenhum / Anotações no Caderno",
+                "Solução Nexus de Interesse": "ERP Completo Nexus (Estoque, Financeiro, Fiscal e Vendas)",
+                "Qtd de Caixas": 2,
+                "Observações": "Interessado em emissão de NFC-e e controle de estoque por grade"
+            },
+            {
+                "Nome da Empresa": "Mercadinho São José",
+                "Nome do Dono": "Maria Oliveira",
+                "WhatsApp / Telefone": "(79) 98877-6655",
+                "Cidade": "Itabaiana",
+                "Estado": "SE",
+                "Segmento": "Supermercado / Mercadinho",
+                "Sistema Atual": "Planilhas do Excel",
+                "Solução Nexus de Interesse": "Frente de Caixa (PDV) / Emissão de Cupom Fiscal NFC-e",
+                "Qtd de Caixas": 3,
+                "Observações": "Quer agilidade no caixa e leitor de código de barras"
+            }
+        ];
+
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Modelo Leads Nexus");
+        XLSX.writeFile(wb, "modelo_leads_nexus_soft_tech.xlsx");
+        toast.success("Planilha modelo baixada com sucesso!");
+    };
+
+    // Confirmar e enviar lote de leads para o backend
+    const handleConfirmImport = async () => {
+        if (parsedLeads.length === 0) {
+            toast.warning("Nenhum lead pronto para importação.");
+            return;
+        }
+        setImporting(true);
+        try {
+            const res = await fetch("/api/leads/import", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ leads: parsedLeads })
+            });
+            const json = await res.json();
+            if (json.status) {
+                toast.success(json.message || `${parsedLeads.length} leads importados com sucesso!`);
+                setIsImportModalOpen(false);
+                setParsedLeads([]);
+                setSelectedFileName("");
+                loadLeads();
+            } else {
+                toast.error(json.message || "Erro ao importar leads");
+            }
+        } catch {
+            toast.error("Erro na comunicação ao importar leads");
+        } finally {
+            setImporting(false);
+        }
+    };
+
     return (
         <div className="flex-1 space-y-6 p-4 md:p-8 pt-6 max-w-7xl mx-auto">
             {/* Cabeçalho */}
@@ -545,7 +705,7 @@ export default function LeadsPage() {
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-2.5 flex-wrap">
                     <Button
                         variant="outline"
                         size="sm"
@@ -555,6 +715,21 @@ export default function LeadsPage() {
                     >
                         <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
                         Atualizar
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                            setParsedLeads([]);
+                            setSelectedFileName("");
+                            setFileError(null);
+                            setIsImportModalOpen(true);
+                        }}
+                        className="h-10 px-3.5 rounded-xl border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold gap-2 shadow-sm"
+                        title="Importar planilha Excel ou CSV com leads captados"
+                    >
+                        <FileSpreadsheet className="h-4 w-4" />
+                        Importar Excel
                     </Button>
                     <Button
                         onClick={handleOpenCreate}
@@ -1555,6 +1730,158 @@ export default function LeadsPage() {
                             Novo Contato
                         </Button>
                     </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* MODAL: IMPORTAR LEADS VIA EXCEL / CSV */}
+            <Dialog open={isImportModalOpen} onOpenChange={setIsImportModalOpen}>
+                <DialogContent className="w-[96vw] sm:max-w-4xl lg:max-w-5xl max-h-[92vh] overflow-y-auto rounded-3xl p-5 sm:p-7 md:p-8 border border-border/80 bg-card/95 backdrop-blur-xl shadow-2xl">
+                    <DialogHeader className="border-b border-border/50 pb-4">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2.5 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                    <FileSpreadsheet className="h-6 w-6" />
+                                </div>
+                                <div>
+                                    <DialogTitle className="text-xl sm:text-2xl font-bold tracking-tight">
+                                        Importar Leads via Excel / CSV
+                                    </DialogTitle>
+                                    <DialogDescription className="text-sm text-muted-foreground mt-0.5">
+                                        Anexe sua planilha com os lojistas captados para adicionar ao funil de prospecção da Nexus Soft Tech.
+                                    </DialogDescription>
+                                </div>
+                            </div>
+
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleDownloadTemplate}
+                                className="rounded-xl gap-2 text-xs font-semibold border-primary/30 text-primary hover:bg-primary/10 h-9"
+                            >
+                                <Download className="h-3.5 w-3.5" />
+                                Baixar Modelo (.xlsx)
+                            </Button>
+                        </div>
+                    </DialogHeader>
+
+                    <div className="space-y-5 pt-3">
+                        {/* Área de Anexo / Upload */}
+                        <div className="p-6 border-2 border-dashed border-border/80 rounded-2xl bg-muted/20 hover:bg-muted/40 transition-colors text-center relative">
+                            <input
+                                type="file"
+                                accept=".xlsx, .xls, .csv"
+                                onChange={handleFileUpload}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            />
+                            <div className="flex flex-col items-center justify-center space-y-2 pointer-events-none">
+                                <div className="p-3 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                                    <Upload className="h-6 w-6" />
+                                </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-sm font-semibold text-foreground">
+                                        {selectedFileName ? selectedFileName : "Clique ou arraste sua planilha aqui"}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        Formatos suportados: Excel (.xlsx, .xls) ou CSV com colunas de Empresa, Dono e Telefone
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Mensagem de Erro de Arquivo */}
+                        {fileError && (
+                            <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-600 dark:text-red-400 flex items-center gap-2">
+                                <AlertTriangle className="h-4 w-4 shrink-0" />
+                                <span>{fileError}</span>
+                            </div>
+                        )}
+
+                        {/* Pré-visualização dos Leads Lidos */}
+                        {parsedLeads.length > 0 && (
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                                        <Check className="h-4 w-4" />
+                                        {parsedLeads.length} leads prontos para serem adicionados à sua base
+                                    </span>
+                                    <span className="text-muted-foreground text-[11px]">
+                                        Mostrando prévia das primeiras 5 linhas
+                                    </span>
+                                </div>
+
+                                <div className="border border-border/60 rounded-xl overflow-hidden bg-background">
+                                    <div className="max-h-60 overflow-y-auto">
+                                        <table className="w-full text-left text-xs">
+                                            <thead className="bg-muted/50 text-muted-foreground font-semibold border-b border-border/50 sticky top-0">
+                                                <tr>
+                                                    <th className="p-2.5 pl-3">Empresa / Loja</th>
+                                                    <th className="p-2.5">Dono / Responsável</th>
+                                                    <th className="p-2.5">Telefone / WhatsApp</th>
+                                                    <th className="p-2.5">Cidade</th>
+                                                    <th className="p-2.5">Segmento</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-border/30">
+                                                {parsedLeads.slice(0, 5).map((lead, idx) => (
+                                                    <tr key={idx} className="hover:bg-muted/20">
+                                                        <td className="p-2.5 pl-3 font-semibold text-foreground truncate max-w-[180px]">
+                                                            {lead.companyName}
+                                                        </td>
+                                                        <td className="p-2.5 text-muted-foreground truncate max-w-[140px]">
+                                                            {lead.ownerName}
+                                                        </td>
+                                                        <td className="p-2.5 font-medium text-emerald-600 dark:text-emerald-400">
+                                                            {lead.phone}
+                                                        </td>
+                                                        <td className="p-2.5 text-muted-foreground">
+                                                            {lead.city}-{lead.state}
+                                                        </td>
+                                                        <td className="p-2.5 text-muted-foreground truncate max-w-[140px]">
+                                                            {lead.segment}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <p className="text-[11px] text-muted-foreground">
+                                    * Todos os leads importados entrarão automaticamente com status <strong>"Novo Lead"</strong> para que sua equipe possa iniciar o primeiro contato pelo WhatsApp no Chat ao Vivo.
+                                </p>
+                            </div>
+                        )}
+
+                        <DialogFooter className="pt-3 gap-2 sm:gap-0 border-t border-border/50">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setIsImportModalOpen(false)}
+                                disabled={importing}
+                                className="rounded-xl h-11 px-5"
+                            >
+                                Cancelar
+                            </Button>
+                            <Button
+                                onClick={handleConfirmImport}
+                                disabled={parsedLeads.length === 0 || importing}
+                                className="rounded-xl h-11 px-6 bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md gap-2"
+                            >
+                                {importing ? (
+                                    <>
+                                        <RefreshCw className="h-4 w-4 animate-spin" />
+                                        Importando {parsedLeads.length} leads...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Check className="h-4 w-4" />
+                                        Confirmar Importação de {parsedLeads.length} Leads
+                                    </>
+                                )}
+                            </Button>
+                        </DialogFooter>
+                    </div>
                 </DialogContent>
             </Dialog>
         </div>
