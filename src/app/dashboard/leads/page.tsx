@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
     Target,
     Plus,
@@ -159,6 +160,7 @@ const STATUS_CONFIG: Record<NexusLead["status"], { label: string; badgeClass: st
 };
 
 export default function LeadsPage() {
+    const router = useRouter();
     const [leads, setLeads] = useState<NexusLead[]>([]);
     const [metrics, setMetrics] = useState<LeadMetrics>({
         total: 0,
@@ -324,15 +326,14 @@ export default function LeadsPage() {
         };
     };
 
-    // Iniciar conversa no WhatsApp
+    // Iniciar conversa no Chat ao Vivo do NEXUS Chat
     const handleWhatsAppClick = (lead: NexusLead) => {
         let clean = cleanPhone(lead.phone);
         if (!clean.startsWith("55") && (clean.length === 10 || clean.length === 11)) {
             clean = `55${clean}`;
         }
-        const message = `Olá ${lead.ownerName}, tudo bem? Sou da Nexus Soft Tech e estou entrando em contato sobre as soluções em sistemas de gestão empresarial para a ${lead.companyName}.`;
-        const url = `https://wa.me/${clean}?text=${encodeURIComponent(message)}`;
-        window.open(url, "_blank");
+        toast.info(`Abrindo conversa com ${lead.ownerName} (${lead.companyName}) no Chat ao Vivo...`, { id: "lead-chat-open" });
+        router.push(`/dashboard/chat/${clean}`);
     };
 
     // Abrir Modal de Criação
@@ -967,90 +968,99 @@ export default function LeadsPage() {
 
             {/* MODAL: NOVO LEAD */}
             <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-xl font-bold">
-                            <Target className="h-5 w-5 text-primary" />
-                            Cadastrar Novo Lead de Lojista
-                        </DialogTitle>
-                        <DialogDescription>
-                            Preencha os dados do lojista captado para a prospecção da Nexus Soft Tech.
-                        </DialogDescription>
+                <DialogContent className="w-[96vw] sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl max-h-[92vh] overflow-y-auto rounded-3xl p-5 sm:p-7 md:p-8 border border-border/80 bg-card/95 backdrop-blur-xl shadow-2xl">
+                    <DialogHeader className="border-b border-border/50 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2.5 rounded-2xl bg-primary/10 text-primary border border-primary/20">
+                                <Target className="h-6 w-6" />
+                            </div>
+                            <div>
+                                <DialogTitle className="text-xl sm:text-2xl font-bold tracking-tight">
+                                    Cadastrar Novo Lead de Lojista
+                                </DialogTitle>
+                                <DialogDescription className="text-sm text-muted-foreground mt-0.5">
+                                    Preencha as informações do lojista captado para a prospecção da Nexus Soft Tech.
+                                </DialogDescription>
+                            </div>
+                        </div>
                     </DialogHeader>
 
-                    <form onSubmit={handleCreateLead} className="space-y-4 pt-2">
+                    <form onSubmit={handleCreateLead} className="space-y-5 pt-3">
                         {/* Seção 1: Dados da Empresa e Dono */}
-                        <div className="space-y-3">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 pb-1">
-                                Dados da Empresa & Dono
-                            </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Nome da Empresa / Loja *</label>
+                        <div className="p-4 sm:p-5 rounded-2xl bg-muted/30 border border-border/60 space-y-4">
+                            <div className="flex items-center gap-2 border-b border-border/50 pb-2">
+                                <Building2 className="h-4 w-4 text-primary" />
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                    Dados da Empresa & Dono
+                                </h4>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 sm:gap-4">
+                                <div className="lg:col-span-6 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Nome da Empresa / Loja *</label>
                                     <Input
                                         placeholder="Ex: Loja Bella Moda"
                                         value={formData.companyName}
                                         onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                                         required
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Nome do Dono / Responsável *</label>
+                                <div className="lg:col-span-6 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Nome do Dono / Responsável *</label>
                                     <Input
                                         placeholder="Ex: Carlos Silva"
                                         value={formData.ownerName}
                                         onChange={(e) => setFormData({ ...formData, ownerName: e.target.value })}
                                         required
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">WhatsApp / Telefone *</label>
+                                <div className="sm:col-span-2 lg:col-span-4 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">WhatsApp / Telefone *</label>
                                     <Input
-                                        placeholder="Ex: 79999887766"
+                                        placeholder="Ex: (79) 99988-7766"
                                         value={formData.phone}
                                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                                         required
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Cidade</label>
+                                <div className="sm:col-span-1 lg:col-span-5 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Cidade</label>
                                     <Input
                                         placeholder="Ex: Itabaiana"
                                         value={formData.city}
                                         onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Estado (UF)</label>
+                                <div className="sm:col-span-1 lg:col-span-3 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Estado (UF)</label>
                                     <Input
                                         placeholder="Ex: SE"
                                         value={formData.state}
                                         onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
                             </div>
                         </div>
 
                         {/* Seção 2: Perfil Comercial & Sistemas */}
-                        <div className="space-y-3 pt-2">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 pb-1">
-                                Perfil Comercial & Sistemas Nexus Soft Tech
-                            </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Segmento do Lojista</label>
+                        <div className="p-4 sm:p-5 rounded-2xl bg-muted/30 border border-border/60 space-y-4">
+                            <div className="flex items-center gap-2 border-b border-border/50 pb-2">
+                                <Monitor className="h-4 w-4 text-primary" />
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                    Perfil Comercial & Soluções Nexus Soft Tech
+                                </h4>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 sm:gap-4">
+                                <div className="lg:col-span-5 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Segmento do Lojista</label>
                                     <select
                                         value={formData.segment}
                                         onChange={(e) => setFormData({ ...formData, segment: e.target.value })}
-                                        className="w-full h-10 px-3 rounded-xl bg-background border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        className="w-full h-10 px-3 rounded-xl bg-background/80 border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 font-medium"
                                     >
                                         {SEGMENT_OPTIONS.map((seg) => (
                                             <option key={seg} value={seg}>{seg}</option>
@@ -1058,71 +1068,75 @@ export default function LeadsPage() {
                                     </select>
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Sistema Atual que o Lojista Usa</label>
+                                <div className="lg:col-span-5 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Sistema Atual que o Lojista Usa</label>
                                     <select
                                         value={formData.currentSystem}
                                         onChange={(e) => setFormData({ ...formData, currentSystem: e.target.value })}
-                                        className="w-full h-10 px-3 rounded-xl bg-background border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        className="w-full h-10 px-3 rounded-xl bg-background/80 border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 font-medium"
                                     >
                                         {CURRENT_SYSTEM_OPTIONS.map((sys) => (
                                             <option key={sys} value={sys}>{sys}</option>
                                         ))}
                                     </select>
                                 </div>
-                            </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div className="space-y-1.5 md:col-span-2">
-                                    <label className="text-xs font-medium">Solução Nexus de Interesse</label>
-                                    <select
-                                        value={formData.systemOfInterest}
-                                        onChange={(e) => setFormData({ ...formData, systemOfInterest: e.target.value })}
-                                        className="w-full h-10 px-3 rounded-xl bg-background border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    >
-                                        {SYSTEM_INTEREST_OPTIONS.map((sol) => (
-                                            <option key={sol} value={sol}>{sol}</option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Qtd de Caixas / PDVs</label>
+                                <div className="sm:col-span-2 lg:col-span-2 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Qtd de Caixas / PDVs</label>
                                     <Input
                                         type="number"
                                         min={1}
                                         max={50}
                                         value={formData.posCount}
                                         onChange={(e) => setFormData({ ...formData, posCount: Number(e.target.value) || 1 })}
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
+                                </div>
+
+                                <div className="lg:col-span-12 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90 flex items-center gap-1.5">
+                                        <Sparkles className="h-3.5 w-3.5 text-primary" />
+                                        Solução Nexus de Interesse
+                                    </label>
+                                    <select
+                                        value={formData.systemOfInterest}
+                                        onChange={(e) => setFormData({ ...formData, systemOfInterest: e.target.value })}
+                                        className="w-full h-10 px-3 rounded-xl bg-background/80 border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 font-medium"
+                                    >
+                                        {SYSTEM_INTEREST_OPTIONS.map((sol) => (
+                                            <option key={sol} value={sol}>{sol}</option>
+                                        ))}
+                                    </select>
                                 </div>
                             </div>
                         </div>
 
                         {/* Seção 3: Datas & Agendamento */}
-                        <div className="space-y-3 pt-2">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 pb-1">
-                                Datas & Agendamento de Contato
-                            </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="p-4 sm:p-5 rounded-2xl bg-muted/30 border border-border/60 space-y-4">
+                            <div className="flex items-center gap-2 border-b border-border/50 pb-2">
+                                <CalendarClock className="h-4 w-4 text-primary" />
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                    Datas & Agendamento de Contato
+                                </h4>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Data de Captação *</label>
+                                    <label className="text-xs font-semibold text-foreground/90">Data de Captação *</label>
                                     <Input
                                         type="date"
                                         value={formData.capturedAt}
                                         onChange={(e) => setFormData({ ...formData, capturedAt: e.target.value })}
                                         required
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Status Inicial</label>
+                                    <label className="text-xs font-semibold text-foreground/90">Status Inicial</label>
                                     <select
                                         value={formData.status}
                                         onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                                        className="w-full h-10 px-3 rounded-xl bg-background border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        className="w-full h-10 px-3 rounded-xl bg-background/80 border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 font-medium"
                                     >
                                         <option value="NOVO">Novo Lead</option>
                                         <option value="EM_CONTATO">Em Contato</option>
@@ -1132,33 +1146,33 @@ export default function LeadsPage() {
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Data de Novo Contato (Retorno)</label>
+                                    <label className="text-xs font-semibold text-foreground/90">Data de Novo Contato (Retorno)</label>
                                     <Input
                                         type="datetime-local"
                                         value={formData.nextContactAt}
                                         onChange={(e) => setFormData({ ...formData, nextContactAt: e.target.value })}
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
+                                    />
+                                </div>
+
+                                <div className="sm:col-span-3 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Observações Iniciais</label>
+                                    <Textarea
+                                        placeholder="Ex: Lojista interessado em trocar o sistema antigo para emitir NFC-e mais rápido e controlar estoque por tamanho..."
+                                        value={formData.notes}
+                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                        rows={3}
+                                        className="rounded-xl resize-none bg-background/80"
                                     />
                                 </div>
                             </div>
-
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-medium">Observações Iniciais</label>
-                                <Textarea
-                                    placeholder="Ex: Lojista interessado em trocar o sistema antigo para emitir NFC-e mais rápido e controlar estoque por tamanho..."
-                                    value={formData.notes}
-                                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                                    rows={2}
-                                    className="rounded-xl resize-none"
-                                />
-                            </div>
                         </div>
 
-                        <DialogFooter className="pt-3">
-                            <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)} className="rounded-xl">
+                        <DialogFooter className="pt-3 gap-2 sm:gap-0">
+                            <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)} className="rounded-xl h-11 px-5">
                                 Cancelar
                             </Button>
-                            <Button type="submit" className="rounded-xl bg-primary font-semibold text-primary-foreground">
+                            <Button type="submit" className="rounded-xl h-11 px-6 bg-primary font-bold text-primary-foreground shadow-md hover:bg-primary/90">
                                 Cadastrar Lead
                             </Button>
                         </DialogFooter>
@@ -1168,83 +1182,94 @@ export default function LeadsPage() {
 
             {/* MODAL: EDITAR LEAD */}
             <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-6">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-xl font-bold">
-                            <Edit className="h-5 w-5 text-primary" />
-                            Editar Dados do Lead
-                        </DialogTitle>
-                        <DialogDescription>
-                            Atualize as informações comerciais da empresa {selectedLead?.companyName}.
-                        </DialogDescription>
+                <DialogContent className="w-[96vw] sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl max-h-[92vh] overflow-y-auto rounded-3xl p-5 sm:p-7 md:p-8 border border-border/80 bg-card/95 backdrop-blur-xl shadow-2xl">
+                    <DialogHeader className="border-b border-border/50 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2.5 rounded-2xl bg-primary/10 text-primary border border-primary/20">
+                                <Edit className="h-6 w-6" />
+                            </div>
+                            <div>
+                                <DialogTitle className="text-xl sm:text-2xl font-bold tracking-tight">
+                                    Editar Dados do Lead
+                                </DialogTitle>
+                                <DialogDescription className="text-sm text-muted-foreground mt-0.5">
+                                    Atualize as informações comerciais da empresa {selectedLead?.companyName}.
+                                </DialogDescription>
+                            </div>
+                        </div>
                     </DialogHeader>
 
-                    <form onSubmit={handleUpdateLead} className="space-y-4 pt-2">
-                        <div className="space-y-3">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 pb-1">
-                                Dados da Empresa & Dono
-                            </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Nome da Empresa / Loja *</label>
+                    <form onSubmit={handleUpdateLead} className="space-y-5 pt-3">
+                        {/* Seção 1: Dados da Empresa e Dono */}
+                        <div className="p-4 sm:p-5 rounded-2xl bg-muted/30 border border-border/60 space-y-4">
+                            <div className="flex items-center gap-2 border-b border-border/50 pb-2">
+                                <Building2 className="h-4 w-4 text-primary" />
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                    Dados da Empresa & Dono
+                                </h4>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 sm:gap-4">
+                                <div className="lg:col-span-6 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Nome da Empresa / Loja *</label>
                                     <Input
                                         value={formData.companyName}
                                         onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                                         required
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Nome do Dono / Responsável *</label>
+                                <div className="lg:col-span-6 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Nome do Dono / Responsável *</label>
                                     <Input
                                         value={formData.ownerName}
                                         onChange={(e) => setFormData({ ...formData, ownerName: e.target.value })}
                                         required
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">WhatsApp / Telefone *</label>
+                                <div className="sm:col-span-2 lg:col-span-4 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">WhatsApp / Telefone *</label>
                                     <Input
                                         value={formData.phone}
                                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                                         required
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Cidade</label>
+                                <div className="sm:col-span-1 lg:col-span-5 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Cidade</label>
                                     <Input
                                         value={formData.city}
                                         onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Estado (UF)</label>
+                                <div className="sm:col-span-1 lg:col-span-3 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Estado (UF)</label>
                                     <Input
                                         value={formData.state}
                                         onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
                             </div>
                         </div>
 
-                        <div className="space-y-3 pt-2">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 pb-1">
-                                Perfil Comercial & Sistemas
-                            </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Segmento</label>
+                        {/* Seção 2: Perfil Comercial & Sistemas */}
+                        <div className="p-4 sm:p-5 rounded-2xl bg-muted/30 border border-border/60 space-y-4">
+                            <div className="flex items-center gap-2 border-b border-border/50 pb-2">
+                                <Monitor className="h-4 w-4 text-primary" />
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                    Perfil Comercial & Soluções Nexus Soft Tech
+                                </h4>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 sm:gap-4">
+                                <div className="lg:col-span-5 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Segmento</label>
                                     <select
                                         value={formData.segment}
                                         onChange={(e) => setFormData({ ...formData, segment: e.target.value })}
-                                        className="w-full h-10 px-3 rounded-xl bg-background border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        className="w-full h-10 px-3 rounded-xl bg-background/80 border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 font-medium"
                                     >
                                         {SEGMENT_OPTIONS.map((seg) => (
                                             <option key={seg} value={seg}>{seg}</option>
@@ -1252,69 +1277,74 @@ export default function LeadsPage() {
                                     </select>
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Sistema Atual do Lojista</label>
+                                <div className="lg:col-span-5 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Sistema Atual do Lojista</label>
                                     <select
                                         value={formData.currentSystem}
                                         onChange={(e) => setFormData({ ...formData, currentSystem: e.target.value })}
-                                        className="w-full h-10 px-3 rounded-xl bg-background border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        className="w-full h-10 px-3 rounded-xl bg-background/80 border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 font-medium"
                                     >
                                         {CURRENT_SYSTEM_OPTIONS.map((sys) => (
                                             <option key={sys} value={sys}>{sys}</option>
                                         ))}
                                     </select>
                                 </div>
-                            </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div className="space-y-1.5 md:col-span-2">
-                                    <label className="text-xs font-medium">Solução Nexus de Interesse</label>
-                                    <select
-                                        value={formData.systemOfInterest}
-                                        onChange={(e) => setFormData({ ...formData, systemOfInterest: e.target.value })}
-                                        className="w-full h-10 px-3 rounded-xl bg-background border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
-                                    >
-                                        {SYSTEM_INTEREST_OPTIONS.map((sol) => (
-                                            <option key={sol} value={sol}>{sol}</option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Qtd de Caixas</label>
+                                <div className="sm:col-span-2 lg:col-span-2 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Qtd de Caixas</label>
                                     <Input
                                         type="number"
                                         min={1}
                                         max={50}
                                         value={formData.posCount}
                                         onChange={(e) => setFormData({ ...formData, posCount: Number(e.target.value) || 1 })}
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
+                                </div>
+
+                                <div className="lg:col-span-12 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90 flex items-center gap-1.5">
+                                        <Sparkles className="h-3.5 w-3.5 text-primary" />
+                                        Solução Nexus de Interesse
+                                    </label>
+                                    <select
+                                        value={formData.systemOfInterest}
+                                        onChange={(e) => setFormData({ ...formData, systemOfInterest: e.target.value })}
+                                        className="w-full h-10 px-3 rounded-xl bg-background/80 border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 font-medium"
+                                    >
+                                        {SYSTEM_INTEREST_OPTIONS.map((sol) => (
+                                            <option key={sol} value={sol}>{sol}</option>
+                                        ))}
+                                    </select>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="space-y-3 pt-2">
-                            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 pb-1">
-                                Status & Agendamento
-                            </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {/* Seção 3: Datas & Agendamento */}
+                        <div className="p-4 sm:p-5 rounded-2xl bg-muted/30 border border-border/60 space-y-4">
+                            <div className="flex items-center gap-2 border-b border-border/50 pb-2">
+                                <CalendarClock className="h-4 w-4 text-primary" />
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                    Status & Agendamento
+                                </h4>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Data de Captação</label>
+                                    <label className="text-xs font-semibold text-foreground/90">Data de Captação</label>
                                     <Input
                                         type="date"
                                         value={formData.capturedAt}
                                         onChange={(e) => setFormData({ ...formData, capturedAt: e.target.value })}
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
                                     />
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Status do Funil</label>
+                                    <label className="text-xs font-semibold text-foreground/90">Status do Funil</label>
                                     <select
                                         value={formData.status}
                                         onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                                        className="w-full h-10 px-3 rounded-xl bg-background border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                                        className="w-full h-10 px-3 rounded-xl bg-background/80 border border-border/60 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 font-medium"
                                     >
                                         <option value="NOVO">Novo Lead</option>
                                         <option value="EM_CONTATO">Em Contato</option>
@@ -1326,32 +1356,32 @@ export default function LeadsPage() {
                                 </div>
 
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-medium">Data de Novo Contato</label>
+                                    <label className="text-xs font-semibold text-foreground/90">Data de Novo Contato</label>
                                     <Input
                                         type="datetime-local"
                                         value={formData.nextContactAt}
                                         onChange={(e) => setFormData({ ...formData, nextContactAt: e.target.value })}
-                                        className="rounded-xl"
+                                        className="rounded-xl h-10 bg-background/80"
+                                    />
+                                </div>
+
+                                <div className="sm:col-span-3 space-y-1.5">
+                                    <label className="text-xs font-semibold text-foreground/90">Observações</label>
+                                    <Textarea
+                                        value={formData.notes}
+                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                        rows={3}
+                                        className="rounded-xl resize-none bg-background/80"
                                     />
                                 </div>
                             </div>
-
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-medium">Observações</label>
-                                <Textarea
-                                    value={formData.notes}
-                                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                                    rows={2}
-                                    className="rounded-xl resize-none"
-                                />
-                            </div>
                         </div>
 
-                        <DialogFooter className="pt-3">
-                            <Button type="button" variant="outline" onClick={() => setIsEditModalOpen(false)} className="rounded-xl">
+                        <DialogFooter className="pt-3 gap-2 sm:gap-0">
+                            <Button type="button" variant="outline" onClick={() => setIsEditModalOpen(false)} className="rounded-xl h-11 px-5">
                                 Cancelar
                             </Button>
-                            <Button type="submit" className="rounded-xl bg-primary font-semibold text-primary-foreground">
+                            <Button type="submit" className="rounded-xl h-11 px-6 bg-primary font-bold text-primary-foreground shadow-md hover:bg-primary/90">
                                 Salvar Alterações
                             </Button>
                         </DialogFooter>
